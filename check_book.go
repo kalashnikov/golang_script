@@ -19,6 +19,7 @@ type Books struct {
 	id        int           `bson:"id" json:"id"`
 	title     string        `bson:"title" json:"title"`
 	title_    string        `bson:"title_" json:"title_"`
+	otitle    string        `bson:"otitle" json:"otitle"`
 	tag       []string      `bson:"tag" json:"tag"`
 	cata      []string      `bson:"cata" json:"cata"`
 	cardlink  string        `bson:"cardlink" json:"cardlink"`
@@ -32,11 +33,13 @@ type Books struct {
 	extra     bson.M        `bson:",inline"`
 }
 
-func main() {
+const zip_name string = "list_person_all_extended_utf8.zip"
+const file_name string = "list_person_all_extended_utf8.csv"
+
+// Download latest file
+func prepareFile() {
 
 	// Remove previous package
-	zip_name := "list_person_all_extended_utf8.zip"
-	file_name := "list_person_all_extended_utf8.csv"
 	if _, err := os.Stat(file_name); err == nil {
 		err1 := os.Remove(zip_name)
 		err2 := os.Remove(file_name)
@@ -68,6 +71,11 @@ func main() {
 			fmt.Println("Unzip finished.")
 		}
 	}
+}
+
+func main() {
+
+	prepareFile()
 
 	// Open File
 	f, ferr := os.Open(file_name)
@@ -105,7 +113,7 @@ func main() {
 			panic(iderr)
 		}
 
-		title, title_ := ary[1], ary[2]
+		title, title_, otitle := ary[1], ary[2], ary[6]
 		cata := strings.Split(strings.Replace(ary[8], "NDC", "", 1), " ")
 
 		for !strings.Contains(ary[11+inc], "-") {
@@ -127,6 +135,7 @@ func main() {
 			"id":        did,
 			"title":     title,
 			"title_":    title_,
+			"otitle":    otitle,
 			"tag":       make([]string, 10),
 			"cata":      cata,
 			"cardlink":  bookcard,

@@ -5,11 +5,14 @@ package main
 //
 
 import (
+	"encoding/csv"
 	"github.com/codegangsta/martini"
 	"github.com/codegangsta/martini-contrib/render"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+	"math/rand"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -21,6 +24,7 @@ type Books struct {
 	id          int           `bson:"id" json:"id"`
 	title       string        `bson:"title" json:"title"`
 	title_      string        `bson:"title_" json:"title_"`
+	otitle      string        `bson:"otitle" json:"otitle"`
 	tag         []string      `bson:"tag" json:"tag"`
 	cata        []string      `bson:"cata" json:"cata"`
 	cardlink    string        `bson:"cardlink" json:"cardlink"`
@@ -66,7 +70,28 @@ type Page struct {
 	Data  string
 }
 
+// Search title/otitle/author for keyword and return author & book information
+func GetBooksByKeyword(keyword string, c *mgo.Collection) (r []bson.M) {
+	m := []bson.M{}
+	if err := c.Find(bson.M{
+		"$or": []interface{}{
+			bson.M{"title": &bson.RegEx{Pattern: keyword, Options: "i"}},
+			bson.M{"otitle": &bson.RegEx{Pattern: keyword, Options: "i"}},
+			bson.M{"author": &bson.RegEx{Pattern: keyword, Options: "i"}},
+		}}).Sort("author").All(&m); err == nil { // Do Query
+		for _, v := range m {
+			v["author_link"] = authorLinkPrefix + strconv.Itoa(v["author_id"].(int)) + ".html"
+			m = append(m, v)
+		}
+	}
+
+	m_ := ResultArray(m).CleanResult()
+	return m_
+}
+
 func main() {
+	rand.Seed(time.Now().UTC().UnixNano())
+
 	m := martini.Classic()
 
 	// render html templates from directory
@@ -75,9 +100,9 @@ func main() {
 	// Home
 	m.Get("/", func(r render.Render) {
 		ary := []Page{}
-		p1 := Page{Title: "Kala", Data: "In Google Taipei"}
-		p2 := Page{Title: "Ashley", Data: "In Tencent"}
-		p3 := Page{Title: "Mama", Data: "In Kaohsiung"}
+		p1 := Page{Title: "Kala", Data: "Google"}
+		p2 := Page{Title: "Ashley", Data: "Tencent"}
+		p3 := Page{Title: "Mama", Data: "Kaohsiung"}
 		ary = append(ary, p1, p2, p3)
 		r.HTML(200, "index", ary)
 	})
@@ -93,31 +118,23 @@ func main() {
 	c := session.DB("aozora").C("books_go")
 
 	m.Get("/book/", func(r render.Render) {
-		m := []bson.M{}
-		if err = c.Find(nil).Limit(50).All(&m); err == nil { // Do Query
-			for _, v := range m {
-				v["author_link"] = authorLinkPrefix + strconv.Itoa(v["author_id"].(int)) + ".html"
-				m = append(m, v)
+		// Open list file to get random author
+		keyword := ""
+		if f, ferr := os.Open("authorList.csv"); ferr != nil {
+			panic(ferr)
+		} else {
+			// Read first line only
+			reader := csv.NewReader(f)
+			if ary, rerr := reader.Read(); rerr == nil {
+				keyword = ary[rand.Int()%len(ary)]
 			}
 		}
-		r.HTML(200, "book", m)
+		m_ := GetBooksByKeyword(keyword, c)
+		r.HTML(200, "book", m_)
 	})
 
 	m.Get("/book/:str", func(params martini.Params, r render.Render) {
-		keyword := params["str"]
-		m := []bson.M{}
-		if err = c.Find(bson.M{
-			"$or": []interface{}{
-				bson.M{"title": &bson.RegEx{Pattern: keyword, Options: "i"}},
-				bson.M{"author": &bson.RegEx{Pattern: keyword, Options: "i"}},
-			}}).Sort("author").All(&m); err == nil { // Do Query
-			for _, v := range m {
-				v["author_link"] = authorLinkPrefix + strconv.Itoa(v["author_id"].(int)) + ".html"
-				m = append(m, v)
-			}
-		}
-
-		m_ := ResultArray(m).CleanResult()
+		m_ := GetBooksByKeyword(params["str"], c)
 		r.HTML(200, "book", m_)
 	})
 
