@@ -10,8 +10,10 @@ import (
 	"github.com/codegangsta/martini-contrib/render"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"sort"
 	"strconv"
@@ -90,6 +92,7 @@ func GetBooksByKeyword(keyword string, c *mgo.Collection) (r []bson.M) {
 }
 
 func main() {
+
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	m := martini.Classic()
@@ -118,19 +121,25 @@ func main() {
 	c := session.DB("aozora").C("books_go")
 
 	m.Get("/book/", func(r render.Render) {
-		// Open list file to get random author
-		keyword := ""
-		if f, ferr := os.Open("authorList.csv"); ferr != nil {
-			panic(ferr)
-		} else {
-			// Read first line only
-			reader := csv.NewReader(f)
-			if ary, rerr := reader.Read(); rerr == nil {
-				keyword = ary[rand.Int()%len(ary)]
+		if _, err := os.Stat("/var/opt/www/go/ranklist.md"); err == nil {
+			if b, err := ioutil.ReadFile("ranklist.md"); err == nil {
+				r.HTML(200, "rank", string(b))
 			}
+		} else {
+			// Open list file to get random author
+			keyword := ""
+			if f, ferr := os.Open("authorList.csv"); ferr != nil {
+				panic(ferr)
+			} else {
+				// Read first line only
+				reader := csv.NewReader(f)
+				if ary, rerr := reader.Read(); rerr == nil {
+					keyword = ary[rand.Int()%len(ary)]
+				}
+			}
+			m_ := GetBooksByKeyword(keyword, c)
+			r.HTML(200, "book", m_)
 		}
-		m_ := GetBooksByKeyword(keyword, c)
-		r.HTML(200, "book", m_)
 	})
 
 	m.Get("/book/:str", func(params martini.Params, r render.Render) {

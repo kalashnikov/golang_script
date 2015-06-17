@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	//"github.com/microcosm-cc/bluemonday"
 	"github.com/moovweb/gokogiri"
 	"github.com/moovweb/gokogiri/css"
+	html "github.com/moovweb/gokogiri/html"
+	//"github.com/russross/blackfriday"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
 	"net/http"
 	"regexp"
@@ -24,7 +30,26 @@ type BookNode struct {
 	real_book_link string
 }
 
-func getRealLink(b BookNode, wg *sync.WaitGroup, s []*BookNode) {
+func getDocByURL(url string) *html.HtmlDocument {
+	resp, err := http.Get(url)
+	if err != nil {
+		panic(err)
+	}
+
+	h, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	doc, err := gokogiri.ParseHtml(h)
+	if err != nil {
+		panic(err)
+	}
+
+	return doc
+}
+
+func getRealLink(b BookNode, wg *sync.WaitGroup, c *mgo.Collection, s []*BookNode) {
 	defer wg.Done()
 
 	// Get the book id
@@ -33,59 +58,60 @@ func getRealLink(b BookNode, wg *sync.WaitGroup, s []*BookNode) {
 		b.book_id, _ = strconv.Atoi(string(array[1]))
 	}
 
-	// TODO Use this Book id to get real booklink in mongodb
+	m := bson.M{}
+	if err := c.Find(bson.M{"id": b.book_id}).One(&m); err == nil { // Do Query
+		b.real_book_link = m["booklink"].(string)
+	}
 
+	// No lock due to fix write position for each goroutine
 	s[b.rank] = &b
 }
 
 func main() {
 
-	var latest_url string
+	// Connect to MongoDB
+	session, err := mgo.Dial("127.0.0.1")
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	// Get the collection
+	c := session.DB("aozora").C("books_go")
 
 	// Get lastest ranking html
-	if resp, err := http.Get(ranking_url); err == nil {
-		if html, err := ioutil.ReadAll(resp.Body); err == nil {
-			if doc, err := gokogiri.ParseHtml(html); err == nil {
-				if nodeArr, err := doc.Search(css.Convert("a", css.GLOBAL)); err == nil {
-					latest_url = ranking_url + nodeArr[0].Attr("href")
-				}
-			}
-		}
+	var latest_url string
+	doc := getDocByURL(ranking_url)
+	if nodeArr, err := doc.Search(css.Convert("a", css.GLOBAL)); err == nil {
+		latest_url = ranking_url + nodeArr[0].Attr("href")
 	}
-
-	var bookArray []BookNode
 
 	// Parsing latest ranking page
 	// Using Gokogiri and its CSS package
-	if resp, err := http.Get(latest_url); err == nil {
-		if html, err := ioutil.ReadAll(resp.Body); err == nil {
-			if doc, err := gokogiri.ParseHtml(html); err == nil {
-				if nodeArr, err := doc.Search(css.Convert("tr td.normal a", css.GLOBAL)); err == nil {
-					for i := 0; i < len(nodeArr)-1; i += 2 {
+	var bookArray []BookNode
+	doc = getDocByURL(latest_url)
+	if nodeArr, err := doc.Search(css.Convert("tr td.normal a", css.GLOBAL)); err == nil {
+		for i := 0; i < len(nodeArr)-1; i += 2 {
+			author_name := strings.TrimSpace(nodeArr[i+1].FirstChild().String())
+			author_link := nodeArr[i+1].Attr("href")
 
-						author_name := strings.TrimSpace(nodeArr[i+1].FirstChild().String())
-						author_link := nodeArr[i+1].Attr("href")
+			// Use book link url to extract author_id and generate author link
+			book_link := nodeArr[i].Attr("href")
+			book_name := strings.TrimSpace(nodeArr[i].FirstChild().String())
 
-						// Use book link url to extract author_id and generate author link
-						book_link := nodeArr[i].Attr("href")
-						book_name := strings.TrimSpace(nodeArr[i].FirstChild().String())
-
-						if strings.Contains(book_link, "person") {
-							author_name, book_name = book_name, author_name
-							author_link, book_link = book_link, author_link
-						}
-
-						bn := BookNode{
-							rank:        i / 2,
-							author_name: author_name,
-							author_link: author_link,
-							book_name:   book_name,
-							book_link:   book_link,
-						}
-						bookArray = append(bookArray, bn)
-					}
-				}
+			if strings.Contains(book_link, "person") {
+				author_name, book_name = book_name, author_name
+				author_link, book_link = book_link, author_link
 			}
+
+			bn := BookNode{
+				rank:        i / 2,
+				author_name: author_name,
+				author_link: author_link,
+				book_name:   book_name,
+				book_link:   book_link,
+			}
+			bookArray = append(bookArray, bn)
 		}
 	}
 
@@ -94,11 +120,21 @@ func main() {
 	slice := make([]*BookNode, len(bookArray))
 	for _, n := range bookArray {
 		wg.Add(1)
-		go getRealLink(n, wg, slice)
+		go getRealLink(n, wg, c, slice)
 	}
 	wg.Wait()
 
+	var markdown bytes.Buffer
+	markdown.WriteString("### [青空文庫　アクセスランキング](" + latest_url + "):\n")
 	for _, b := range slice {
-		fmt.Println(strconv.Itoa(b.rank) + " | Author: " + b.author_name + " => " + b.author_link + " | Book[" + strconv.Itoa(b.book_id) + "]: " + b.book_name + " => " + b.book_link)
+		idx := strconv.Itoa(b.rank + 1)
+		str := fmt.Sprintf("   %s. [%s](%s) - [%s](%s)\n", idx, b.author_name, b.author_link, b.book_name, b.real_book_link)
+		markdown.WriteString(str)
 	}
+	fmt.Println(markdown.String())
+
+	// Markdown to HTML by using Blackfriday
+	//unsafe := blackfriday.MarkdownCommon(markdown.Bytes())
+	//html := bluemonday.UGCPolicy().SanitizeBytes(unsafe)
+	//fmt.Println(string(html))
 }
