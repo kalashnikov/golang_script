@@ -33,7 +33,7 @@
 - [mgo](https://labix.org/mgo)
   + [Unstructured MongoDB collections with mgo](http://stackoverflow.com/questions/18340031/unstructured-mongodb-collections-with-mgo)
   + [mgo example](https://gist.github.com/border/3489566)
-  + [mgo文檔](中文 http://jimmykuu.sinaapp.com/static/books/mgo_guide/index.html#document-index)
+  + [mgo文檔](http://jimmykuu.sinaapp.com/static/books/mgo_guide/index.html#document-index)
 - [Regex Syntax - RE2](https://github.com/google/re2/wiki/Syntax)
   + [Golang Regex Tutorial](https://github.com/StefanSchroeder/Golang-Regex-Tutorial)
 - [martini](https://github.com/go-martini/martini/blob/master/translations/README_zh_tw.md)
