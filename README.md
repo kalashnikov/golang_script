@@ -41,6 +41,7 @@
 - [Gokogiri](https://godoc.org/github.com/moovweb/gokogiri)
   + [Chinese Article](http://wppurking.github.io/2013/08/30/gokogiri-de-shi-yong-xiao-shi.html)
   + [Example](https://gist.github.com/technoweenie/5078118)
+- [pool of goroutines](http://stackoverflow.com/questions/18405023/how-would-you-define-a-pool-of-goroutines-to-be-executed-at-once-in-golang) 
 
 ---
 
