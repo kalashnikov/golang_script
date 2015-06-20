@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/qiniu/iconv"
 	"io/ioutil"
 	"os"
 	"path"
@@ -28,7 +29,7 @@ type RegPack struct {
 	re_post   *regexp.Regexp
 }
 
-func genTxt(file string, reg RegPack) {
+func genTxt(file string, reg RegPack, cd iconv.Iconv) {
 	outpath := "txt/" + strings.Split(path.Base(file), ".")[0] + ".txt"
 	if f, err := ioutil.ReadFile(file); err == nil {
 		str := reg.re_pre.ReplaceAllString(string(f), "") // Section front of content
@@ -41,8 +42,11 @@ func genTxt(file string, reg RegPack) {
 		str = reg.re_em.ReplaceAllString(str, "")
 		str = reg.re_en.ReplaceAllString(str, "") // Signle tag
 		fmt.Println(outpath)
+
+		// Do the conversion before write out
+		// No additional encoding config for file needed
 		if out, err := os.Create(outpath); err == nil {
-			out.WriteString(str)
+			out.WriteString(cd.ConvString(str))
 		}
 	}
 }
@@ -63,6 +67,14 @@ func main() {
 	reg.re_em = regexp.MustCompile("(?is)<em[^>]*>(.*?)</em>")
 	reg.re_post = regexp.MustCompile("(?s)(</div>\n)?<div class=\"bibliographical_information\">.*$")
 
+	// Use Iconv to do the conversion
+	cd, err := iconv.Open("utf-8", "shift-jis") // convert shift-jis to utf-8
+	if err != nil {
+		fmt.Println("iconv.Open failed!")
+		return
+	}
+	defer cd.Close()
+
 	// Ref: How would you define a pool of goroutines to be executed at once in Golang?
 	//  http://stackoverflow.com/questions/18405023/how-would-you-define-a-pool-of-goroutines-to-be-executed-at-once-in-golang
 	tasks := make(chan string, 64)
@@ -73,7 +85,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			for file := range tasks {
-				genTxt(file, reg)
+				genTxt(file, reg, cd)
 			}
 			wg.Done()
 		}()
