@@ -1,5 +1,9 @@
 package main
 
+//
+// Get Aozora HTML file from website
+//
+
 import (
 	"fmt"
 	"gopkg.in/mgo.v2"

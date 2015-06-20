@@ -1,5 +1,9 @@
 package main
 
+//
+// Transform Aozora HTML file into txt
+//
+
 import (
 	"fmt"
 	"io/ioutil"
@@ -7,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -44,6 +49,8 @@ func genTxt(file string, reg RegPack) {
 
 func main() {
 
+	cpunum := runtime.NumCPU()
+
 	// Regular expression for html clean-up
 	var reg RegPack
 	reg.re_pre = regexp.MustCompile("(?s)^.*^.*<div class=\"main_text\">")
@@ -62,7 +69,7 @@ func main() {
 
 	// spawn four worker goroutines
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for i := 0; i < cpunum; i++ {
 		wg.Add(1)
 		go func() {
 			for file := range tasks {
