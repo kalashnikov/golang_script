@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
+	//"time"
 )
 
 func parseToNode(contents string) []string {
@@ -57,6 +57,7 @@ func parseToNode(contents string) []string {
 }
 
 func calTF(file string, idfList map[string]float64, tfList map[string]map[string]float64) {
+	total_words := 0.0
 	results := map[string]float64{}
 	if f, err := ioutil.ReadFile(file); err == nil {
 		for _, v := range parseToNode(string(f)) {
@@ -64,8 +65,15 @@ func calTF(file string, idfList map[string]float64, tfList map[string]map[string
 				continue
 			}
 			results[v]++
+			total_words++
 		}
 	}
+
+	// Calculate TF
+	for _, v := range results {
+		v = v / total_words
+	}
+
 	file_id := ""
 	if strings.Contains(file, "_") {
 		file_id = strings.Split(path.Base(file), "_")[0]
@@ -76,7 +84,7 @@ func calTF(file string, idfList map[string]float64, tfList map[string]map[string
 }
 
 func main() {
-	start := time.Now()
+	//start := time.Now()
 	cpunum := runtime.NumCPU()
 
 	tfList := make(map[string]map[string]float64, 20000)
@@ -146,14 +154,21 @@ func main() {
 	}
 
 	// Check the result
-	fmt.Println("#### Result ####")
-	for word, m := range tfFinal {
-		fmt.Printf("%s [%g]: ", word, idfList[word])
-		for doc, v := range m {
-			fmt.Printf("%s(%g) ", doc, v)
+	word := ""
+	for w, m := range tfFinal {
+		word = strings.Trim(w, " ")
+		if word == "" || strings.Contains(word, ",") {
+			continue
 		}
-		fmt.Printf("\n")
+		if idf, ok := idfList[word]; ok {
+			fmt.Printf("%s,%g,", word, idf)
+			list := make([]string, 0, len(m))
+			for doc, v := range m {
+				list = append(list, fmt.Sprintf("%s_%g", doc, v))
+			}
+			fmt.Printf("%s\n", strings.Join(list, ","))
+		}
 	}
 
-	fmt.Printf("Time used: %v", time.Since(start))
+	//fmt.Printf("Time used: %v", time.Since(start))
 }
