@@ -6,8 +6,10 @@ package main
 
 import (
 	"encoding/csv"
-	"github.com/codegangsta/martini"
+	"github.com/bluele/mecab-golang"
 	"github.com/codegangsta/martini-contrib/render"
+	"github.com/go-martini/martini"
+	"golang.org/x/text/width"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
@@ -15,30 +17,124 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 )
 
-//{ "_id" : ObjectId("557c8a526607852a166feda8"), "id" : 3031, "author" : "小山内薫", "author_en" : "OsanaiKaoru", "open_at" : "2001-05-01", "update_at" : "2014-09-17", "title" : "梨の実", "title_" : "なしのみ", "tag" : [ "", "", "", "", "", "", "", "", "", "" ], "cata" : [ "", "913" ], "cardlink" : "http://www.aozora.gr.jp/cards/000479/card3031.html", "booklink" : "http://www.aozora.gr.jp/cards/000479/files/3031_19531.html", "author_id" : 479, "load_at" : ISODate("2015-06-13T19:53:54.136Z") }
-type Books struct {
-	_id         bson.ObjectId `bson:"_id,omitempty" json:"id"`
-	id          int           `bson:"id" json:"id"`
-	title       string        `bson:"title" json:"title"`
-	title_      string        `bson:"title_" json:"title_"`
-	otitle      string        `bson:"otitle" json:"otitle"`
-	tag         []string      `bson:"tag" json:"tag"`
-	cata        []string      `bson:"cata" json:"cata"`
-	cardlink    string        `bson:"cardlink" json:"cardlink"`
-	booklink    string        `bson:"booklink" json:"booklink"`
-	author_id   int           `bson:"author_id" json:"author_id"`
-	author      string        `bson:"author" json:"author"`
-	author_en   string        `bson:"author_en" json:"author_en"`
-	open_at     string        `bson:"open_at" json:"open_at"`
-	update_at   string        `bson:"update_at" json:"update_at"`
-	load_at     time.Time     `bson:"load_at" json:"load_at"`
-	extra       bson.M        `bson:",inline"`
-	author_link string
+const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
+const RETURN_MAX_LENGTH = 30
+
+// https://gist.github.com/kylelemons/1236125
+type ValSorter struct {
+	keys []int
+	vals []float64
+}
+
+func newvalsorter(m map[int]float64) *ValSorter {
+	vs := &ValSorter{
+		keys: make([]int, 0, len(m)),
+		vals: make([]float64, 0, len(m)),
+	}
+	for k, v := range m {
+		vs.keys = append(vs.keys, k)
+		vs.vals = append(vs.vals, v)
+	}
+	return vs
+}
+
+func (vs *ValSorter) Sort() {
+	sort.Sort(vs)
+}
+
+func (vs *ValSorter) Len() int           { return len(vs.vals) }
+func (vs *ValSorter) Less(i, j int) bool { return vs.vals[i] > vs.vals[j] }
+func (vs *ValSorter) Swap(i, j int) {
+	vs.vals[i], vs.vals[j] = vs.vals[j], vs.vals[i]
+	vs.keys[i], vs.keys[j] = vs.keys[j], vs.keys[i]
+}
+
+func getStopWords() map[string]bool {
+	// Create set of stopwords
+	f, err := ioutil.ReadFile("stopwords.csv")
+	if err != nil {
+		panic(err)
+	}
+	ary := strings.Split(string(f), ",")
+	stopwords := make(map[string]bool, len(ary))
+	for _, v := range ary {
+		stopwords[v] = true
+	}
+	return stopwords
+}
+
+func filter(word string) (string, bool) {
+	str := strings.ToLower(word)
+	str = width.Narrow.String(str)
+	str = strings.TrimSpace(str)
+
+	// Use unicode method to check the word is meaningful or not
+	// There exist many Symbol or non-sense words ...
+	isWord := false
+	runes := []rune(str)
+	for _, u := range runes {
+		if unicode.IsNumber(u) || unicode.IsLetter(u) {
+			isWord = true
+			break
+		}
+	}
+
+	return str, isWord
+}
+
+func cleanWords(ary []string, stopwords map[string]bool) []string {
+	out := make([]string, 0, len(ary))
+	set := make(map[string]bool, len(ary)/10)
+	for _, v := range ary {
+		if str, isWord := filter(v); str != "" && isWord && !stopwords[str] && !set[str] {
+			set[str] = true
+			out = append(out, v) // Original word
+		}
+	}
+	return out
+}
+
+func parseToNode(contents string) []string {
+
+	// Init mecab
+	m, err := mecab.New("-Owakati")
+	if err != nil {
+		panic(err)
+	}
+	defer m.Destroy()
+
+	tg, err := m.NewTagger()
+	if err != nil {
+		panic(err)
+	}
+	defer tg.Destroy()
+
+	output := make([]string, 50)
+	lt, err := m.NewLattice(contents)
+	if err != nil {
+		panic(err)
+	}
+	defer lt.Destroy()
+
+	node := tg.ParseToNode(lt)
+	for {
+		features := strings.Split(node.Feature(), ",")
+		if features[0] == "名詞" {
+			output = append(output, node.Surface())
+		}
+		if node.Next() != nil {
+			break
+		}
+	}
+	return output
 }
 
 // For Sorting
@@ -65,13 +161,6 @@ func (a ResultArray) CleanResult() ResultArray {
 	return re
 }
 
-const authorLinkPrefix = "http://www.aozora.gr.jp/index_pages/person"
-
-type Page struct {
-	Title string
-	Data  string
-}
-
 // Search title/otitle/author for keyword and return author & book information
 func GetBooksByKeyword(keyword string, c *mgo.Collection) (r []bson.M) {
 	m := []bson.M{}
@@ -82,7 +171,7 @@ func GetBooksByKeyword(keyword string, c *mgo.Collection) (r []bson.M) {
 			bson.M{"author": &bson.RegEx{Pattern: keyword, Options: "i"}},
 		}}).Sort("author").All(&m); err == nil { // Do Query
 		for _, v := range m {
-			v["author_link"] = authorLinkPrefix + strconv.Itoa(v["author_id"].(int)) + ".html"
+			v["author_link"] = AUTHORLINKPREFIX + strconv.Itoa(v["author_id"].(int)) + ".html"
 			m = append(m, v)
 		}
 	}
@@ -91,24 +180,76 @@ func GetBooksByKeyword(keyword string, c *mgo.Collection) (r []bson.M) {
 	return m_
 }
 
+func GetBookByList(docList []int, c *mgo.Collection) (r []bson.M) {
+	m := []bson.M{}
+	if err := c.Find(bson.M{"id": bson.M{"$in": docList}}).All(&m); err == nil { // Do Query
+		for _, v := range m {
+			v["author_link"] = AUTHORLINKPREFIX + strconv.Itoa(v["author_id"].(int)) + ".html"
+			m = append(m, v)
+		}
+	}
+
+	m_ := ResultArray(m).CleanResult()
+
+	// Sort into same order of docList
+	// O(n^2) but only size=20....
+	m__ := []bson.M{}
+	for _, v := range docList {
+		for _, d := range m_ {
+			if v == d["id"].(int) {
+				m__ = append(m__, d)
+			}
+		}
+	}
+
+	return m__
+}
+
+// Search words using TF-IDF and return book id list sorted by scores
+func GetBooksByWords(keyword []string, c *mgo.Collection) []int {
+	m := bson.M{}
+	results := map[int]float64{} // Book ID to TF-IDF scores
+	for _, word := range keyword {
+		if err := c.Find(bson.M{"word": word}).One(&m); err == nil { // Do Query
+			docs := reflect.ValueOf(m["docs"])
+			scores := reflect.ValueOf(m["score"])
+			for i := 0; i < docs.Len(); i++ {
+				idx := docs.Index(i).Interface().(int)
+				if score, ok := results[idx]; ok {
+					score += scores.Index(i).Interface().(float64)
+				} else {
+					results[idx] = scores.Index(i).Interface().(float64)
+				}
+			}
+		}
+	}
+
+	// Sort by Scores
+	vs := newvalsorter(results)
+	vs.Sort()
+
+	// Limit by RETURN_MAX_LENGTH
+	var final []int
+	if len(vs.keys) > RETURN_MAX_LENGTH {
+		final = vs.keys[:RETURN_MAX_LENGTH-1]
+	} else {
+		final = vs.keys
+	}
+	return final
+}
+
+type TemplateBag struct {
+	Title string
+	Msg   string
+	Ary   ResultArray
+}
+
 func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	m := martini.Classic()
-
-	// render html templates from directory
-	m.Use(render.Renderer())
-
-	// Home
-	m.Get("/", func(r render.Render) {
-		ary := []Page{}
-		p1 := Page{Title: "Kala", Data: "Google"}
-		p2 := Page{Title: "Ashley", Data: "Tencent"}
-		p3 := Page{Title: "Mama", Data: "Kaohsiung"}
-		ary = append(ary, p1, p2, p3)
-		r.HTML(200, "index", ary)
-	})
+	// Stop word list
+	stopwords := getStopWords()
 
 	// Connect to MongoDB
 	session, err := mgo.Dial("127.0.0.1")
@@ -118,16 +259,38 @@ func main() {
 	defer session.Close()
 
 	// Get the collection
-	c := session.DB("aozora").C("books_go")
+	c_book := session.DB("aozora").C("books_go")
+	c_score := session.DB("aozora").C("tf_idf")
 
-	m.Get("/book/", func(r render.Render) {
+	m := martini.Classic()
+
+	// render html templates from directory
+	m.Use(render.Renderer())
+
+	// Home
+	m.Get("/", func(r render.Render) {
+		ary := []TemplateBag{}
+		p1 := TemplateBag{Title: "Kala", Msg: "Google"}
+		p2 := TemplateBag{Title: "Ashley", Msg: "Tencent"}
+		p3 := TemplateBag{Title: "Mama", Msg: "Kaohsiung"}
+		ary = append(ary, p1, p2, p3)
+		r.HTML(200, "index", ary)
+	})
+
+	m.Get("/book/", func(w http.ResponseWriter, r *http.Request, re render.Render) {
 		if _, err := os.Stat("/var/opt/www/go/ranklist.md"); err == nil {
 			if b, err := ioutil.ReadFile("ranklist.md"); err == nil {
-				r.HTML(200, "rank", string(b))
+				re.HTML(200, "rank", string(b))
 			}
 		} else {
-			// Open list file to get random author
-			keyword := ""
+			url := "/go/book/random"
+			http.Redirect(w, r, url, 302)
+		}
+	})
+
+	m.Get("/book/:str", func(params martini.Params, r render.Render) {
+		keyword := params["str"]
+		if keyword == "random" {
 			if f, ferr := os.Open("authorList.csv"); ferr != nil {
 				panic(ferr)
 			} else {
@@ -137,18 +300,44 @@ func main() {
 					keyword = ary[rand.Int()%len(ary)]
 				}
 			}
-			m_ := GetBooksByKeyword(keyword, c)
-			r.HTML(200, "book", m_)
 		}
+		m_ := GetBooksByKeyword(keyword, c_book)
+		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
+		r.HTML(200, "book", bag)
 	})
 
-	m.Get("/book/:str", func(params martini.Params, r render.Render) {
-		m_ := GetBooksByKeyword(params["str"], c)
-		r.HTML(200, "book", m_)
+	m.Get("/search-book/", func(w http.ResponseWriter, r *http.Request, re render.Render) {
+		keyword := ""
+		if f, ferr := os.Open("authorList.csv"); ferr != nil {
+			panic(ferr)
+		} else {
+			// Read first line only
+			reader := csv.NewReader(f)
+			if ary, rerr := reader.Read(); rerr == nil {
+				keyword = ary[rand.Int()%len(ary)]
+			}
+		}
+		m_ := GetBooksByKeyword(keyword, c_book)
+		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
+		re.HTML(200, "search", bag)
+	})
+
+	m.Get("/search-book/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		keyword := params["str"]
+		words := cleanWords(parseToNode(keyword), stopwords)
+		list := GetBooksByWords(words, c_score) // Get Book list by score
+		m_ := GetBookByList(list, c_book)
+		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
+		re.HTML(200, "search", bag)
 	})
 
 	m.Post("/search", func(w http.ResponseWriter, r *http.Request, re render.Render) {
 		url := "/go/book/" + r.FormValue("text")
+		http.Redirect(w, r, url, 302)
+	})
+
+	m.Post("/search-book", func(w http.ResponseWriter, r *http.Request, re render.Render) {
+		url := "/go/search-book/" + r.FormValue("text")
 		http.Redirect(w, r, url, 302)
 	})
 
