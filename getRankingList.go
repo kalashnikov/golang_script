@@ -3,15 +3,16 @@ package main
 import (
 	"bytes"
 	"fmt"
-	//"github.com/microcosm-cc/bluemonday"
 	"github.com/moovweb/gokogiri"
 	"github.com/moovweb/gokogiri/css"
 	html "github.com/moovweb/gokogiri/html"
-	//"github.com/russross/blackfriday"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"os/exec"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -67,29 +68,11 @@ func getRealLink(b BookNode, wg *sync.WaitGroup, c *mgo.Collection, s []*BookNod
 	s[b.rank] = &b
 }
 
-func main() {
-
-	// Connect to MongoDB
-	session, err := mgo.Dial("127.0.0.1")
-	if err != nil {
-		panic(err)
-	}
-	defer session.Close()
-
-	// Get the collection
-	c := session.DB("aozora").C("books_go")
-
-	// Get lastest ranking html
-	var latest_url string
-	doc := getDocByURL(ranking_url)
-	if nodeArr, err := doc.Search(css.Convert("a", css.GLOBAL)); err == nil {
-		latest_url = ranking_url + nodeArr[0].Attr("href")
-	}
-
+func genRankList(latest_url string, c *mgo.Collection) string {
 	// Parsing latest ranking page
 	// Using Gokogiri and its CSS package
 	var bookArray []BookNode
-	doc = getDocByURL(latest_url)
+	doc := getDocByURL(latest_url)
 	if nodeArr, err := doc.Search(css.Convert("tr td.normal a", css.GLOBAL)); err == nil {
 		for i := 0; i < len(nodeArr)-1; i += 2 {
 			author_name := strings.TrimSpace(nodeArr[i+1].FirstChild().String())
@@ -131,10 +114,57 @@ func main() {
 		str := fmt.Sprintf("   %s. [%s](%s) - [%s](%s)\n", idx, b.author_name, b.author_link, b.book_name, b.real_book_link)
 		markdown.WriteString(str)
 	}
-	fmt.Println(markdown.String())
 
-	// Markdown to HTML by using Blackfriday
-	//unsafe := blackfriday.MarkdownCommon(markdown.Bytes())
-	//html := bluemonday.UGCPolicy().SanitizeBytes(unsafe)
-	//fmt.Println(string(html))
+	return markdown.String()
+}
+
+const staticName = "ranklist.md"
+const work_folder = "/var/opt/www/go/"
+
+func main() {
+
+	err := os.Chdir(work_folder)
+	if err != nil {
+		panic(err)
+	}
+
+	// Connect to MongoDB
+	session, err := mgo.Dial("127.0.0.1")
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	// Get the collection
+	c := session.DB("aozora").C("books_go")
+
+	// Get lastest ranking html
+	var latest_url string
+	doc := getDocByURL(ranking_url)
+	if nodeArr, err := doc.Search(css.Convert("a", css.GLOBAL)); err == nil {
+		latest_url = ranking_url + nodeArr[0].Attr("href")
+	}
+
+	// Init output file name
+	re_post := regexp.MustCompile("_xhtml.html")
+	outputFile := fmt.Sprintf("ranklist_%s.md", re_post.ReplaceAllString(path.Base(latest_url), ""))
+
+	if _, err = os.Stat(outputFile); err == nil {
+		// No update. Return
+		return
+	} else {
+		// Download and create new output file
+		if out, err := os.Create(outputFile); err == nil {
+			contents := genRankList(latest_url, c)
+			out.WriteString(contents)
+		}
+
+		// Update the static link
+		if _, err = os.Stat(staticName); err == nil {
+			cmd := exec.Command("unlink", staticName)
+			cmd.Run()
+		}
+		cmd := exec.Command("ln", "-s", outputFile, staticName)
+		cmd.Run()
+	}
 }
