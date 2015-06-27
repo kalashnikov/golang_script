@@ -47,7 +47,7 @@
 
 ---
 
-### [DEMO](http://kalakuo.info/go/book/)
+### [Demo Site](http://kalakuo.info/go/book/), [Full-text Search](http://kalakuo.info/go/search-book/)
 
 ---
 
