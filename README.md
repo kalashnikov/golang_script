@@ -47,7 +47,17 @@
 
 ---
 
-### [Demo Site](http://kalakuo.info/go/book/), [Full-text Search](http://kalakuo.info/go/search-book/)
+### [Demo Site](http://kalakuo.info/go/book/), [Full-text Search](http://kalakuo.info/go/search-book/), [OBM Shop](http://obmshop.com/lines)
+
+---
+
+### ToDo List
+- Try to migrate to Nginx 1.7.11 and using [Thread Pool](http://nginx.com/blog/thread-pools-boost-performance-9x/)
+- Clean the code and do modulization.
+- Combine two search box. 
+- Add script for personal Markdown wiki.
+- Add auth middleware for personal subdomain.
+- Try [goworker](http://www.goworker.org/)
 
 ---
 

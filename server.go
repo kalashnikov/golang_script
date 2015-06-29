@@ -2,10 +2,12 @@ package main
 
 //
 // Website Server using Golang
+// By Kala.Kuo http://kalakuo.info
 //
 
 import (
 	"encoding/csv"
+	"github.com/Shaked/gomobiledetect"
 	"github.com/bluele/mecab-golang"
 	"github.com/codegangsta/martini-contrib/render"
 	"github.com/go-martini/martini"
@@ -13,6 +15,7 @@ import (
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
+	//"log"
 	"math/rand"
 	"net/http"
 	_ "net/http/pprof"
@@ -28,6 +31,34 @@ import (
 const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
 const RETURN_MAX_LENGTH = 30
 
+type TemplateBag struct {
+	Title string
+	Msg   string
+	Ary   ResultArray
+	Ary2  ResultArray
+	Ary3  ResultArray
+	List  []string
+}
+
+type StickerBag struct {
+	Title string
+	Ary   ResultArray
+	List  []string
+}
+
+type StickerDetailBag struct {
+	Id          int
+	Title       string
+	Name        string
+	Detail      string
+	Thumbnail   string
+	Description string
+	DetailImg   string
+	Price       int
+	Tags        []string
+}
+
+// Create a structure from map and sorted by value
 // https://gist.github.com/kylelemons/1236125
 type ValSorter struct {
 	keys []int
@@ -57,7 +88,7 @@ func (vs *ValSorter) Swap(i, j int) {
 	vs.keys[i], vs.keys[j] = vs.keys[j], vs.keys[i]
 }
 
-func getStopWords() map[string]bool {
+func GetStopWords() map[string]bool {
 	// Create set of stopwords
 	f, err := ioutil.ReadFile("stopwords.csv")
 	if err != nil {
@@ -238,10 +269,116 @@ func GetBooksByWords(keyword []string, c *mgo.Collection) []int {
 	return final
 }
 
-type TemplateBag struct {
-	Title string
-	Msg   string
-	Ary   ResultArray
+func GetLimitByPlatform(detect *mobiledetect.MobileDetect) int {
+	limit := 80
+	if detect.IsMobile() {
+		limit = 20
+	} else if detect.IsTablet() {
+		limit = 40
+	}
+	return limit
+}
+
+func GetTags(c *mgo.Collection) []string {
+	m := []string{}
+	m_ := []string{}
+	if err := c.Find(nil).Distinct("tag", &m); err == nil { // Do Query
+		for _, v := range m {
+			if v == "" || strings.Contains(v, "http") ||
+				strings.Contains(v, "line") ||
+				strings.Contains(v, " ") {
+				continue
+			}
+			m_ = append(m_, v)
+		}
+	}
+	return m_
+}
+
+// Do the data retrieval and return result
+func GetStickers(limit int, c *mgo.Collection, op_type int) []bson.M {
+	m := []bson.M{}
+	if op_type == 0 {
+		c.Find(bson.M{"id": bson.M{"$lt": 1000000}}).Sort("weigth").Limit(limit).All(&m)
+	} else if op_type == 1 {
+		c.Find(bson.M{"id": bson.M{"$gt": 1000000}}).Sort("weigth").Limit(limit).All(&m)
+	} else if op_type == 2 {
+		c.Find(bson.M{"price": 25}).Sort("weigth").Limit(limit).All(&m)
+	} else if op_type == 3 {
+		c.Find(bson.M{"price": 50}).Sort("weigth").Limit(limit).All(&m)
+	} else if op_type == 4 {
+		c.Find(bson.M{"price": 75}).Sort("weigth").Limit(limit).All(&m)
+	} else {
+		c.Find(nil).Sort("weigth").Limit(limit).All(&m)
+	}
+	return m
+}
+
+func GetStickersByKeyword(keyword string, c *mgo.Collection) []bson.M {
+	m := []bson.M{}
+	c.Find(bson.M{
+		"$or": []interface{}{
+			bson.M{"name": &bson.RegEx{Pattern: keyword, Options: "i"}},
+			bson.M{"description": &bson.RegEx{Pattern: keyword, Options: "i"}},
+			bson.M{"alias": &bson.RegEx{Pattern: keyword, Options: "i"}},
+		},
+	}).Sort("weigth").Limit(50).All(&m)
+	return m
+}
+
+func GetStickersByTag(tag string, c *mgo.Collection) []bson.M {
+	m := []bson.M{}
+	c.Find(bson.M{"tag": tag}).Sort("weigth").Limit(50).All(&m)
+	return m
+}
+
+func GetStickersDetail(id int, c *mgo.Collection) StickerDetailBag {
+	m := bson.M{}
+	bag := StickerDetailBag{}
+	if err := c.Find(bson.M{"id": id}).One(&m); err == nil {
+		bag.Id = m["id"].(int)
+		bag.Name = m["name"].(string)
+		bag.Detail = m["detail"].(string)
+		bag.Thumbnail = m["thumbnail"].(string)
+		bag.Description = m["description"].(string)
+		bag.DetailImg = m["detailImg"].(string)
+
+		// Try to convert into Int
+		v := reflect.ValueOf(m["price"])
+		if v.Kind() == reflect.Int {
+			bag.Price = v.Interface().(int)
+		} else if v.Kind() == reflect.Float64 {
+			bag.Price = int(v.Interface().(float64))
+		}
+
+		// Tag might be empty, need checking
+		tagList := make([]string, 0)
+		tags := reflect.ValueOf(m["tag"])
+		if tags.Kind() != 0 {
+			for i := 0; i < tags.Len(); i++ {
+				str := tags.Index(i).Interface().(string)
+				tagList = append(tagList, str)
+			}
+		}
+		bag.Tags = tagList
+	}
+	bag.Title = m["name"].(string) + " | 歐貝賣專業代購"
+	return bag
+}
+
+func GenStickerBag(detect *mobiledetect.MobileDetect, c_stickers *mgo.Collection,
+	op_type int, keyword string, tag string) StickerBag {
+	limit := GetLimitByPlatform(detect)
+	tags := GetTags(c_stickers)
+	m := []bson.M{}
+	if keyword != "" {
+		m = GetStickersByKeyword(keyword, c_stickers)
+	} else if tag != "" {
+		m = GetStickersByTag(tag, c_stickers)
+	} else {
+		m = GetStickers(limit, c_stickers, op_type)
+	}
+	return StickerBag{Title: "LINE 貼圖| 歐貝賣專業代購", Ary: m, List: tags}
 }
 
 func main() {
@@ -249,7 +386,7 @@ func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	// Stop word list
-	stopwords := getStopWords()
+	stopwords := GetStopWords()
 
 	// Connect to MongoDB
 	session, err := mgo.Dial("127.0.0.1")
@@ -261,6 +398,8 @@ func main() {
 	// Get the collection
 	c_book := session.DB("aozora").C("books_go")
 	c_score := session.DB("aozora").C("tf_idf")
+	c_stickers := session.DB("obmWeb").C("stickers")
+	c_themes := session.DB("obmWeb").C("themes")
 
 	m := martini.Classic()
 
@@ -275,6 +414,95 @@ func main() {
 		p3 := TemplateBag{Title: "Mama", Msg: "Kaohsiung"}
 		ary = append(ary, p1, p2, p3)
 		r.HTML(200, "index", ary)
+	})
+
+	// Official Sticker
+	m.Get("/lines/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		tag := r.FormValue("tag")
+		keyword := r.FormValue("filter")
+		detect := mobiledetect.NewMobileDetect(r, nil)
+		bag := GenStickerBag(detect, c_stickers, 0, keyword, tag)
+		if detect.IsMobile() || detect.IsTablet() {
+			re.HTML(200, "line", bag)
+		} else {
+			re.HTML(200, "flat", bag)
+		}
+	})
+
+	// Original Sticker
+	m.Get("/clines/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		tag := r.FormValue("tag")
+		keyword := r.FormValue("filter")
+		detect := mobiledetect.NewMobileDetect(r, nil)
+		bag := GenStickerBag(detect, c_stickers, 1, keyword, tag)
+		if detect.IsMobile() || detect.IsTablet() {
+			re.HTML(200, "line", bag)
+		} else {
+			re.HTML(200, "flat", bag)
+		}
+	})
+
+	// Sticker with Price 25
+	m.Get("/dollar25/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		tag := r.FormValue("tag")
+		keyword := r.FormValue("filter")
+		detect := mobiledetect.NewMobileDetect(r, nil)
+		bag := GenStickerBag(detect, c_stickers, 2, keyword, tag)
+		if detect.IsMobile() || detect.IsTablet() {
+			re.HTML(200, "line", bag)
+		} else {
+			re.HTML(200, "flat", bag)
+		}
+	})
+
+	// Sticker with Price 50
+	m.Get("/dollar50/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		tag := r.FormValue("tag")
+		keyword := r.FormValue("filter")
+		detect := mobiledetect.NewMobileDetect(r, nil)
+		bag := GenStickerBag(detect, c_stickers, 3, keyword, tag)
+		if detect.IsMobile() || detect.IsTablet() {
+			re.HTML(200, "line", bag)
+		} else {
+			re.HTML(200, "flat", bag)
+		}
+	})
+
+	// Sticker with Price 75
+	m.Get("/dollar75/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		tag := r.FormValue("tag")
+		keyword := r.FormValue("filter")
+		detect := mobiledetect.NewMobileDetect(r, nil)
+		bag := GenStickerBag(detect, c_stickers, 4, keyword, tag)
+		if detect.IsMobile() || detect.IsTablet() {
+			re.HTML(200, "line", bag)
+		} else {
+			re.HTML(200, "flat", bag)
+		}
+	})
+
+	// Themes
+	m.Get("/themes/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		tag := r.FormValue("tag")
+		keyword := r.FormValue("filter")
+		detect := mobiledetect.NewMobileDetect(r, nil)
+		bag := GenStickerBag(detect, c_themes, 5, keyword, tag)
+		if detect.IsMobile() || detect.IsTablet() {
+			re.HTML(200, "line", bag)
+		} else {
+			re.HTML(200, "flat", bag)
+		}
+	})
+
+	// Detail sticker page
+	m.Get("/detail/:id", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		id, err := strconv.Atoi(params["id"])
+		if err != nil {
+			url := "/go/lines/"
+			http.Redirect(w, r, url, 302)
+		}
+		bag := GetStickersDetail(id, c_stickers)
+		re.HTML(200, "darkly", bag)
 	})
 
 	m.Get("/book/", func(w http.ResponseWriter, r *http.Request, re render.Render) {
