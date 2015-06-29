@@ -24,6 +24,7 @@
 - [Go入門指南](https://github.com/Unknwon/the-way-to-go_ZH_CN)
 - [Go語言標準庫](https://github.com/polaris1119/The-Golang-Standard-Library-by-Example)
 - [Go網絡編程](http://jan.newmarch.name/go/zh/)
+- [Build Web Application with Golang](https://github.com/astaxie/build-web-application-with-golang/blob/master/zh/SUMMARY.md)
 
 ---
 
@@ -56,8 +57,8 @@
 - Clean the code and do modulization.
 - Combine two search box. 
 - Add script for personal Markdown wiki.
-- Add auth middleware for personal subdomain.
-- Try [goworker](http://www.goworker.org/)
+- Add auth middleware for personal subdomain. [1](http://stackoverflow.com/questions/25218903/how-are-people-managing-authentication-in-go), [2](https://github.com/apexskier/httpauth),[3](https://github.com/go-authboss/authboss)
+- Fix [this](http://obmshop.com/detail/1142030) - Add update script. 
 
 ---
 
