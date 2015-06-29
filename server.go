@@ -53,7 +53,7 @@ type StickerDetailBag struct {
 	Detail      string
 	Thumbnail   string
 	Description string
-	DetailImg   string
+	DetailImg   []string
 	Price       int
 	Tags        []string
 }
@@ -65,7 +65,7 @@ type ValSorter struct {
 	vals []float64
 }
 
-func newvalsorter(m map[int]float64) *ValSorter {
+func NewValSorter(m map[int]float64) *ValSorter {
 	vs := &ValSorter{
 		keys: make([]int, 0, len(m)),
 		vals: make([]float64, 0, len(m)),
@@ -102,7 +102,7 @@ func GetStopWords() map[string]bool {
 	return stopwords
 }
 
-func filter(word string) (string, bool) {
+func Filter(word string) (string, bool) {
 	str := strings.ToLower(word)
 	str = width.Narrow.String(str)
 	str = strings.TrimSpace(str)
@@ -121,11 +121,11 @@ func filter(word string) (string, bool) {
 	return str, isWord
 }
 
-func cleanWords(ary []string, stopwords map[string]bool) []string {
+func CleanWords(ary []string, stopwords map[string]bool) []string {
 	out := make([]string, 0, len(ary))
 	set := make(map[string]bool, len(ary)/10)
 	for _, v := range ary {
-		if str, isWord := filter(v); str != "" && isWord && !stopwords[str] && !set[str] {
+		if str, isWord := Filter(v); str != "" && isWord && !stopwords[str] && !set[str] {
 			set[str] = true
 			out = append(out, v) // Original word
 		}
@@ -133,7 +133,7 @@ func cleanWords(ary []string, stopwords map[string]bool) []string {
 	return out
 }
 
-func parseToNode(contents string) []string {
+func ParseStringToNode(contents string) []string {
 
 	// Init mecab
 	m, err := mecab.New("-Owakati")
@@ -256,7 +256,7 @@ func GetBooksByWords(keyword []string, c *mgo.Collection) []int {
 	}
 
 	// Sort by Scores
-	vs := newvalsorter(results)
+	vs := NewValSorter(results)
 	vs.Sort()
 
 	// Limit by RETURN_MAX_LENGTH
@@ -314,6 +314,7 @@ func GetStickers(limit int, c *mgo.Collection, op_type int) []bson.M {
 	return m
 }
 
+// For keyword searching
 func GetStickersByKeyword(keyword string, c *mgo.Collection) []bson.M {
 	m := []bson.M{}
 	c.Find(bson.M{
@@ -326,43 +327,68 @@ func GetStickersByKeyword(keyword string, c *mgo.Collection) []bson.M {
 	return m
 }
 
+// For tag searching
 func GetStickersByTag(tag string, c *mgo.Collection) []bson.M {
 	m := []bson.M{}
 	c.Find(bson.M{"tag": tag}).Sort("weigth").Limit(50).All(&m)
 	return m
 }
 
-func GetStickersDetail(id int, c *mgo.Collection) StickerDetailBag {
+func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerDetailBag {
 	m := bson.M{}
 	bag := StickerDetailBag{}
-	if err := c.Find(bson.M{"id": id}).One(&m); err == nil {
+
+	// For Sticker, id is Int.
+	// For Theme, id is String.
+	if idInt, err := strconv.Atoi(id); err == nil {
+		c_stickers.Find(bson.M{"id": idInt}).One(&m)
 		bag.Id = m["id"].(int)
-		bag.Name = m["name"].(string)
-		bag.Detail = m["detail"].(string)
-		bag.Thumbnail = m["thumbnail"].(string)
-		bag.Description = m["description"].(string)
-		bag.DetailImg = m["detailImg"].(string)
+	} else {
+		c_themes.Find(bson.M{"id": id}).One(&m)
+		bag.Id, _ = strconv.Atoi(m["id"].(string))
+	}
 
-		// Try to convert into Int
-		v := reflect.ValueOf(m["price"])
-		if v.Kind() == reflect.Int {
-			bag.Price = v.Interface().(int)
-		} else if v.Kind() == reflect.Float64 {
-			bag.Price = int(v.Interface().(float64))
-		}
+	bag.Name = m["name"].(string)
+	bag.Detail = m["detail"].(string)
+	bag.Thumbnail = m["thumbnail"].(string)
+	bag.Description = m["description"].(string)
 
-		// Tag might be empty, need checking
-		tagList := make([]string, 0)
-		tags := reflect.ValueOf(m["tag"])
-		if tags.Kind() != 0 {
-			for i := 0; i < tags.Len(); i++ {
-				str := tags.Index(i).Interface().(string)
-				tagList = append(tagList, str)
+	// Detail image may be list
+	imgList := make([]string, 0)
+	v := reflect.ValueOf(m["detailImg"])
+	if v.Kind() == reflect.String {
+		imgList = append(imgList, m["detailImg"].(string))
+	} else {
+		imgs := v
+		if imgs.Kind() != 0 {
+			for i := 0; i < imgs.Len(); i++ {
+				str := imgs.Index(i).Interface().(string)
+				imgList = append(imgList, str)
 			}
 		}
-		bag.Tags = tagList
 	}
-	bag.Title = m["name"].(string) + " | 歐貝賣專業代購"
+	bag.DetailImg = imgList
+
+	// Try to convert into Int
+	v = reflect.ValueOf(m["price"])
+	if v.Kind() == reflect.Int {
+		bag.Price = v.Interface().(int)
+	} else if v.Kind() == reflect.Float64 {
+		bag.Price = int(v.Interface().(float64))
+	}
+
+	// Tag might be empty, need checking
+	tagList := make([]string, 0)
+	tags := reflect.ValueOf(m["tag"])
+	if tags.Kind() != 0 {
+		for i := 0; i < tags.Len(); i++ {
+			str := tags.Index(i).Interface().(string)
+			tagList = append(tagList, str)
+		}
+	}
+	bag.Tags = tagList
+
+	bag.Title = bag.Name + " | 歐貝賣專業代購"
 	return bag
 }
 
@@ -496,12 +522,7 @@ func main() {
 
 	// Detail sticker page
 	m.Get("/detail/:id", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
-		id, err := strconv.Atoi(params["id"])
-		if err != nil {
-			url := "/go/lines/"
-			http.Redirect(w, r, url, 302)
-		}
-		bag := GetStickersDetail(id, c_stickers)
+		bag := GetStickersDetail(params["id"], c_stickers, c_themes)
 		re.HTML(200, "darkly", bag)
 	})
 
@@ -552,7 +573,7 @@ func main() {
 
 	m.Get("/search-book/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
 		keyword := params["str"]
-		words := cleanWords(parseToNode(keyword), stopwords)
+		words := CleanWords(ParseStringToNode(keyword), stopwords)
 		list := GetBooksByWords(words, c_score) // Get Book list by score
 		m_ := GetBookByList(list, c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
