@@ -56,8 +56,6 @@
 - Try to migrate to Nginx 1.7.11 and using [Thread Pool](http://nginx.com/blog/thread-pools-boost-performance-9x/)
 - Clean the code and do modulization.
 - Combine two search box. 
-- Add script for personal Markdown wiki.
-- Add auth middleware for personal subdomain. [1](http://stackoverflow.com/questions/25218903/how-are-people-managing-authentication-in-go), [2](https://github.com/apexskier/httpauth),[3](https://github.com/go-authboss/authboss)
 - Fix [this](http://obmshop.com/detail/1142030) - Add update script. 
 
 ---

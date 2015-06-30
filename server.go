@@ -11,6 +11,7 @@ import (
 	"github.com/bluele/mecab-golang"
 	"github.com/codegangsta/martini-contrib/render"
 	"github.com/go-martini/martini"
+	"github.com/martini-contrib/auth"
 	"golang.org/x/text/width"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
@@ -20,6 +21,8 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"path"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -407,6 +410,55 @@ func GenStickerBag(detect *mobiledetect.MobileDetect, c_stickers *mgo.Collection
 	return StickerBag{Title: "LINE 貼圖| 歐貝賣專業代購", Ary: m, List: tags}
 }
 
+func UpdateMenuFile() string {
+	os.Chdir("/var/opt/www/go/note/")
+	if _, err := os.Stat("menu.md"); err == nil {
+		os.RemoveAll("menu.md") // Remove old one
+
+		// Do the conversion before write out
+		// No additional encoding config for file needed
+		if out, err := os.Create("menu.md"); err == nil {
+			out.WriteString("---\n")
+			out.WriteString("## Notes Contents List\n")
+			if a, err := filepath.Glob("**/*.md"); err == nil {
+				sort.Strings(a)
+
+				folderName := ""
+				for _, i := range a {
+					ary := strings.Split(string(i), "/")
+					if folderName != ary[0] {
+						out.WriteString("* **" + ary[0] + "**\n")
+						folderName = ary[0]
+					}
+					name := strings.Split(string(ary[1]), ".")[0]
+					out.WriteString("  - [" + name + "](" + i + ")\n")
+				}
+			}
+			out.WriteString("---")
+		}
+	}
+
+	b, _ := ioutil.ReadFile("menu.md")
+	os.Chdir("/var/opt/www/go/")
+	return string(b)
+}
+
+func GetNoteContents(fp string) (name, contents string) {
+	os.Chdir("/var/opt/www/go/note/")
+	_, err := os.Stat(fp)
+	if err != nil {
+		panic(err)
+	}
+	b, _ := ioutil.ReadFile(fp)
+	n := strings.Split(path.Base(fp), ".")[0]
+	os.Chdir("/var/opt/www/go/")
+	return n, string(b)
+}
+
+func NoteAuth(username, password string) bool {
+	return username == os.Getenv("NOTE_ACCOUNT") && password == os.Getenv("NOTE_PASSWORD")
+}
+
 func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
@@ -441,6 +493,10 @@ func main() {
 		ary = append(ary, p1, p2, p3)
 		r.HTML(200, "index", ary)
 	})
+
+	// ------------------------------------------------------------------------------------- //
+	// -------------------------------       OBM SHOP       -------------------------------- //
+	// ------------------------------------------------------------------------------------- //
 
 	// Official Sticker
 	m.Get("/lines/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
@@ -526,6 +582,8 @@ func main() {
 		re.HTML(200, "darkly", bag)
 	})
 
+	// ------------------------------------------------------------------------------------- //
+
 	m.Get("/book/", func(w http.ResponseWriter, r *http.Request, re render.Render) {
 		if _, err := os.Stat("/var/opt/www/go/ranklist.md"); err == nil {
 			if b, err := ioutil.ReadFile("ranklist.md"); err == nil {
@@ -589,6 +647,22 @@ func main() {
 		url := "/go/search-book/" + r.FormValue("text")
 		http.Redirect(w, r, url, 302)
 	})
+
+	// ------------------------------------------------------------------------------------- //
+
+	m.Get("/note/", auth.BasicFunc(NoteAuth), func(w http.ResponseWriter, re render.Render) {
+		msg := UpdateMenuFile()
+		bag := TemplateBag{Title: "Note Contents List", Msg: msg}
+		re.HTML(200, "md", bag)
+	})
+
+	m.Get("/note/:folder/:file", auth.BasicFunc(NoteAuth), func(params martini.Params, re render.Render) {
+		name, msg := GetNoteContents(params["folder"] + "/" + params["file"])
+		bag := TemplateBag{Title: name, Msg: msg}
+		re.HTML(200, "md", bag)
+	})
+
+	// ------------------------------------------------------------------------------------- //
 
 	m.Run()
 }
