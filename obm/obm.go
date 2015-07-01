@@ -1,7 +1,7 @@
 package obm
 
 import (
-	"fmt"
+	//"fmt"
 	"github.com/Shaked/gomobiledetect"
 	"github.com/kalashnikov/golang_script/utility"
 	"gopkg.in/mgo.v2"
@@ -108,9 +108,21 @@ func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerD
 	// For Theme, id is String.
 	if idInt, err := strconv.Atoi(id); err == nil {
 		c_stickers.Find(bson.M{"id": idInt}).One(&m)
+
+		// If not found, try to get it
+		v := reflect.ValueOf(m["id"])
+		if v.Kind() != reflect.Int {
+			GetStickerInfo(id, c_stickers, c_themes)
+		}
+
 		bag.Id = m["id"].(int)
 	} else {
 		c_themes.Find(bson.M{"id": id}).One(&m)
+		// If not found, try to get it
+		v := reflect.ValueOf(m["id"])
+		if v.Kind() != reflect.String {
+			GetStickerInfo(id, c_stickers, c_themes)
+		}
 		bag.Id, _ = strconv.Atoi(m["id"].(string))
 	}
 
@@ -173,8 +185,14 @@ func GenStickerBag(detect *mobiledetect.MobileDetect, c_stickers *mgo.Collection
 	return StickerBag{Title: "LINE 貼圖| 歐貝賣專業代購", Ary: m, List: tags}
 }
 
-func GetStickerInfo(idStr string) bool {
+// Download Sticker Information from Official Site
+// Insert data into database if successful and return true
+// Return false if something wrong
+// TODO: Need further improve header/cookies for some stickers
+func GetStickerInfo(idStr string, c_stickers, c_themes *mgo.Collection) bool {
 	rand.Seed(time.Now().UTC().UnixNano())
+
+	c := c_stickers
 
 	// Determine this is a sticker or theme
 	urlStr, id, theme := "", 0, 0
@@ -183,6 +201,7 @@ func GetStickerInfo(idStr string) bool {
 		urlStr = "https://store.line.me/stickershop/product/" + idStr + "/zh-Hant"
 	} else {
 		theme = 1
+		c = c_themes
 		urlStr = "https://store.line.me/themeshop/product/" + idStr + "/zh-Hant"
 	}
 
@@ -211,7 +230,7 @@ func GetStickerInfo(idStr string) bool {
 	}
 
 	// Set Price
-	dprice, err := strconv.ParseFloat(geturl.GetSingleText(contents, "p.mdMN05Price")[3:], 64) //, "￥").to_i*0.3
+	dprice, err := strconv.ParseFloat(geturl.GetSingleText(contents, "p.mdMN05Price")[3:], 64)
 	if err != nil {
 		panic(err)
 	} else {
@@ -231,8 +250,49 @@ func GetStickerInfo(idStr string) bool {
 
 	random := rand.Int() % 100000000
 
-	fmt.Printf("id: %d\nidStr: %s\ndesc: %s\ndprice: %g\nimgtext: %s\nimgsrc: %s\nrandom: %d\n", id, idStr, desc, dprice, imgtext, imgsrc, random)
-	fmt.Println(detailImg)
+	if theme == 0 {
+		_, err = c.Upsert(bson.M{"id": id}, bson.M{"$set": bson.M{
+			"id":          id,
+			"sticker_id":  id,
+			"name":        imgtext,
+			"tag":         make([]string, 0),
+			"detail":      urlStr,
+			"description": desc,
+			"price":       dprice,
+			"thumbnail":   imgsrc,
+			"weigth":      0,
+			"random":      random,
+			"detailImg":   detailImg,
+			"update_at":   time.Now(),
+			"create_at":   time.Now(),
+		},
+		},
+		)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		_, err = c.Upsert(bson.M{"id": id}, bson.M{"$set": bson.M{
+			"id":          idStr,
+			"sticker_id":  idStr,
+			"name":        imgtext,
+			"tag":         make([]string, 0),
+			"detail":      urlStr,
+			"description": desc,
+			"price":       dprice,
+			"thumbnail":   imgsrc,
+			"weigth":      0,
+			"random":      random,
+			"detailImg":   detailImg,
+			"update_at":   time.Now(),
+			"create_at":   time.Now(),
+		},
+		},
+		)
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	return true
 }
