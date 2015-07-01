@@ -112,16 +112,14 @@ func GetStickersByTag(tag string, c *mgo.Collection) []bson.M {
 	m := []bson.M{}
 	if tag == "隨機" {
 		c.Find(nil).Sort("random").Limit(25).All(&m)
-		go UpdateStickerRandomField(c)
+		go UpdateStickerRandomField(m, c)
 	} else {
 		c.Find(bson.M{"tag": tag}).Sort("weigth").Limit(50).All(&m)
 	}
 	return m
 }
 
-func UpdateStickerRandomField(c *mgo.Collection) {
-	m := []bson.M{}
-	c.Find(nil).Sort("random").Limit(25).All(&m) // Get Top100 Sorted by Random
+func UpdateStickerRandomField(m []bson.M, c *mgo.Collection) {
 	for _, v := range m {
 		id := v["id"]
 		v["random"] = rand.Int() % 100000000
