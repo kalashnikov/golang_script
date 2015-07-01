@@ -52,12 +52,6 @@
 
 ---
 
-### ToDo List
-- Try to migrate to Nginx 1.7.11 and using [Thread Pool](http://nginx.com/blog/thread-pools-boost-performance-9x/)
-- Clean the code and do modulization.
-- Combine two search box. 
-- Fix [this](http://obmshop.com/detail/1142030) - Add update script. 
+The MIT License (MIT)
 
----
-
-#### by [Kala Kuo](http://kalakuo.info/)
+Copyright (c) 2015 [Kala Kuo](http://kalakuo.info/)
