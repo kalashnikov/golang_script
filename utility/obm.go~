@@ -1,0 +1,75 @@
+package obm
+
+import (
+	"github.com/kalashnikov/golang_script/utility"
+	"math/rand"
+	"net/http/cookiejar"
+	"net/url"
+	"os"
+	"strconv"
+	"time"
+)
+
+func GetStickerInfo(idStr string) bool {
+	rand.Seed(time.Now().UTC().UnixNano())
+
+	// Determine this is a sticker or theme
+	urlStr, id, theme := "", 0, 0
+	if v, err := strconv.Atoi(idStr); err == nil {
+		id, theme = v, 0
+		urlStr = "https://store.line.me/stickershop/product/" + idStr + "/zh-Hant"
+	} else {
+		theme = 1
+		urlStr = "https://store.line.me/themeshop/product/" + idStr + "/zh-Hant"
+	}
+
+	gCookieJar, _ := cookiejar.New(nil)
+
+	priceTable := make(map[float64]float64, 3)
+	priceTable[30] = 25
+	priceTable[60] = 50
+	priceTable[90] = 75
+
+	// Get cookie
+	urlBase := "https://store.line.me/stickershop/"
+	cookies := geturl.TestGet(urlBase, gCookieJar)
+
+	// Set the gCookieJar
+	u, _ := url.Parse(urlStr)
+	gCookieJar.SetCookies(u, cookies)
+
+	// Use Cookie (Broken - no difference)
+	contents := geturl.GetDocByURLWithCookie(urlStr, gCookieJar)
+
+	// Check data exist
+	desc := geturl.GetSingleText(contents, "p.mdMN07Desc")
+	if desc == "" {
+		return false
+	}
+
+	// Set Price
+	dprice, err := strconv.ParseFloat(geturl.GetSingleText(contents, "p.mdMN05Price")[3:], 64) //, "￥").to_i*0.3
+	if err != nil {
+		panic(err)
+	} else {
+		dprice = priceTable[dprice*0.25]
+	}
+
+	imgtext := geturl.GetSingleText(contents, "h2.mdMN05Ttl")
+	imgsrc := geturl.GetFirstAttr(contents, "div.mdMN05Img img", "src")
+
+	// Detail Image may be more than one
+	detailImg := make([]string, 1)
+	if theme == 0 {
+		detailImg = append(detailImg, geturl.GetFirstAttr(contents, "div.mdMN07Img img", "src"))
+	} else {
+		detailImg = geturl.GetAttrs(contents, "li.mdMN07Li img", "src")
+	}
+
+	random := rand.Int() % 100000000
+
+	//fmt.Printf("id: %d\nidStr: %s\ndesc: %s\ndprice: %g\nimgtext: %s\nimgsrc: %s\nrandom: %d\n", id, idStr, desc, dprice, imgtext, imgsrc, random)
+	//fmt.Println(detailImg)
+
+	return true
+}

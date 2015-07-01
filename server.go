@@ -8,11 +8,12 @@ package main
 import (
 	"encoding/csv"
 	"github.com/Shaked/gomobiledetect"
-	"github.com/bluele/mecab-golang"
 	"github.com/codegangsta/martini-contrib/render"
 	"github.com/go-martini/martini"
+	"github.com/kalashnikov/golang_script/book"
+	"github.com/kalashnikov/golang_script/note"
+	"github.com/kalashnikov/golang_script/obm"
 	"github.com/martini-contrib/auth"
-	"golang.org/x/text/width"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
@@ -21,18 +22,10 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"path"
-	"path/filepath"
-	"reflect"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
-	"unicode"
 )
 
-const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
-const RETURN_MAX_LENGTH = 30
+type ResultArray []bson.M
 
 type TemplateBag struct {
 	Title string
@@ -43,428 +36,12 @@ type TemplateBag struct {
 	List  []string
 }
 
-type StickerBag struct {
-	Title string
-	Ary   ResultArray
-	List  []string
-}
-
-type StickerDetailBag struct {
-	Id          int
-	Title       string
-	Name        string
-	Detail      string
-	Thumbnail   string
-	Description string
-	DetailImg   []string
-	Price       int
-	Tags        []string
-}
-
-// Create a structure from map and sorted by value
-// https://gist.github.com/kylelemons/1236125
-type ValSorter struct {
-	keys []int
-	vals []float64
-}
-
-func NewValSorter(m map[int]float64) *ValSorter {
-	vs := &ValSorter{
-		keys: make([]int, 0, len(m)),
-		vals: make([]float64, 0, len(m)),
-	}
-	for k, v := range m {
-		vs.keys = append(vs.keys, k)
-		vs.vals = append(vs.vals, v)
-	}
-	return vs
-}
-
-func (vs *ValSorter) Sort() {
-	sort.Sort(vs)
-}
-
-func (vs *ValSorter) Len() int           { return len(vs.vals) }
-func (vs *ValSorter) Less(i, j int) bool { return vs.vals[i] > vs.vals[j] }
-func (vs *ValSorter) Swap(i, j int) {
-	vs.vals[i], vs.vals[j] = vs.vals[j], vs.vals[i]
-	vs.keys[i], vs.keys[j] = vs.keys[j], vs.keys[i]
-}
-
-func GetStopWords() map[string]bool {
-	// Create set of stopwords
-	f, err := ioutil.ReadFile("stopwords.csv")
-	if err != nil {
-		panic(err)
-	}
-	ary := strings.Split(string(f), ",")
-	stopwords := make(map[string]bool, len(ary))
-	for _, v := range ary {
-		stopwords[v] = true
-	}
-	return stopwords
-}
-
-func Filter(word string) (string, bool) {
-	str := strings.ToLower(word)
-	str = width.Narrow.String(str)
-	str = strings.TrimSpace(str)
-
-	// Use unicode method to check the word is meaningful or not
-	// There exist many Symbol or non-sense words ...
-	isWord := false
-	runes := []rune(str)
-	for _, u := range runes {
-		if unicode.IsNumber(u) || unicode.IsLetter(u) {
-			isWord = true
-			break
-		}
-	}
-
-	return str, isWord
-}
-
-func CleanWords(ary []string, stopwords map[string]bool) []string {
-	out := make([]string, 0, len(ary))
-	set := make(map[string]bool, len(ary)/10)
-	for _, v := range ary {
-		if str, isWord := Filter(v); str != "" && isWord && !stopwords[str] && !set[str] {
-			set[str] = true
-			out = append(out, v) // Original word
-		}
-	}
-	return out
-}
-
-func ParseStringToNode(contents string) []string {
-
-	// Init mecab
-	m, err := mecab.New("-Owakati")
-	if err != nil {
-		panic(err)
-	}
-	defer m.Destroy()
-
-	tg, err := m.NewTagger()
-	if err != nil {
-		panic(err)
-	}
-	defer tg.Destroy()
-
-	output := make([]string, 50)
-	lt, err := m.NewLattice(contents)
-	if err != nil {
-		panic(err)
-	}
-	defer lt.Destroy()
-
-	node := tg.ParseToNode(lt)
-	for {
-		features := strings.Split(node.Feature(), ",")
-		if features[0] == "名詞" {
-			output = append(output, node.Surface())
-		}
-		if node.Next() != nil {
-			break
-		}
-	}
-	return output
-}
-
-// For Sorting
-type ResultArray []bson.M
-
-func (a ResultArray) Len() int           { return len(a) }
-func (a ResultArray) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ResultArray) Less(i, j int) bool { return a[i]["author"].(string) < a[j]["author"].(string) }
-
-// Clean the result of MongoDB query
-func (a ResultArray) CleanResult() ResultArray {
-	var re ResultArray
-	m := make(map[string]bool)
-
-	// Sort and remove duplicate
-	sort.Sort(a)
-	for _, i := range a {
-		key := i["author"].(string) + i["title"].(string)
-		if _, ok := m[key]; !ok {
-			re = append(re, i)
-			m[key] = true
-		}
-	}
-	return re
-}
-
-// Search title/otitle/author for keyword and return author & book information
-func GetBooksByKeyword(keyword string, c *mgo.Collection) (r []bson.M) {
-	m := []bson.M{}
-	if err := c.Find(bson.M{
-		"$or": []interface{}{
-			bson.M{"title": &bson.RegEx{Pattern: keyword, Options: "i"}},
-			bson.M{"otitle": &bson.RegEx{Pattern: keyword, Options: "i"}},
-			bson.M{"author": &bson.RegEx{Pattern: keyword, Options: "i"}},
-		}}).Sort("author").All(&m); err == nil { // Do Query
-		for _, v := range m {
-			v["author_link"] = AUTHORLINKPREFIX + strconv.Itoa(v["author_id"].(int)) + ".html"
-			m = append(m, v)
-		}
-	}
-
-	m_ := ResultArray(m).CleanResult()
-	return m_
-}
-
-func GetBookByList(docList []int, c *mgo.Collection) (r []bson.M) {
-	m := []bson.M{}
-	if err := c.Find(bson.M{"id": bson.M{"$in": docList}}).All(&m); err == nil { // Do Query
-		for _, v := range m {
-			v["author_link"] = AUTHORLINKPREFIX + strconv.Itoa(v["author_id"].(int)) + ".html"
-			m = append(m, v)
-		}
-	}
-
-	m_ := ResultArray(m).CleanResult()
-
-	// Sort into same order of docList
-	// O(n^2) but only size=20....
-	m__ := []bson.M{}
-	for _, v := range docList {
-		for _, d := range m_ {
-			if v == d["id"].(int) {
-				m__ = append(m__, d)
-			}
-		}
-	}
-
-	return m__
-}
-
-// Search words using TF-IDF and return book id list sorted by scores
-func GetBooksByWords(keyword []string, c *mgo.Collection) []int {
-	m := bson.M{}
-	results := map[int]float64{} // Book ID to TF-IDF scores
-	for _, word := range keyword {
-		if err := c.Find(bson.M{"word": word}).One(&m); err == nil { // Do Query
-			docs := reflect.ValueOf(m["docs"])
-			scores := reflect.ValueOf(m["score"])
-			for i := 0; i < docs.Len(); i++ {
-				idx := docs.Index(i).Interface().(int)
-				if score, ok := results[idx]; ok {
-					score += scores.Index(i).Interface().(float64)
-				} else {
-					results[idx] = scores.Index(i).Interface().(float64)
-				}
-			}
-		}
-	}
-
-	// Sort by Scores
-	vs := NewValSorter(results)
-	vs.Sort()
-
-	// Limit by RETURN_MAX_LENGTH
-	var final []int
-	if len(vs.keys) > RETURN_MAX_LENGTH {
-		final = vs.keys[:RETURN_MAX_LENGTH-1]
-	} else {
-		final = vs.keys
-	}
-	return final
-}
-
-func GetLimitByPlatform(detect *mobiledetect.MobileDetect) int {
-	limit := 80
-	if detect.IsMobile() {
-		limit = 20
-	} else if detect.IsTablet() {
-		limit = 40
-	}
-	return limit
-}
-
-func GetTags(c *mgo.Collection) []string {
-	m := []string{}
-	m_ := []string{}
-	if err := c.Find(nil).Distinct("tag", &m); err == nil { // Do Query
-		for _, v := range m {
-			if v == "" || strings.Contains(v, "http") ||
-				strings.Contains(v, "line") ||
-				strings.Contains(v, " ") {
-				continue
-			}
-			m_ = append(m_, v)
-		}
-	}
-	return m_
-}
-
-// Do the data retrieval and return result
-func GetStickers(limit int, c *mgo.Collection, op_type int) []bson.M {
-	m := []bson.M{}
-	if op_type == 0 {
-		c.Find(bson.M{"id": bson.M{"$lt": 1000000}}).Sort("weigth").Limit(limit).All(&m)
-	} else if op_type == 1 {
-		c.Find(bson.M{"id": bson.M{"$gt": 1000000}}).Sort("weigth").Limit(limit).All(&m)
-	} else if op_type == 2 {
-		c.Find(bson.M{"price": 25}).Sort("weigth").Limit(limit).All(&m)
-	} else if op_type == 3 {
-		c.Find(bson.M{"price": 50}).Sort("weigth").Limit(limit).All(&m)
-	} else if op_type == 4 {
-		c.Find(bson.M{"price": 75}).Sort("weigth").Limit(limit).All(&m)
-	} else {
-		c.Find(nil).Sort("weigth").Limit(limit).All(&m)
-	}
-	return m
-}
-
-// For keyword searching
-func GetStickersByKeyword(keyword string, c *mgo.Collection) []bson.M {
-	m := []bson.M{}
-	c.Find(bson.M{
-		"$or": []interface{}{
-			bson.M{"name": &bson.RegEx{Pattern: keyword, Options: "i"}},
-			bson.M{"description": &bson.RegEx{Pattern: keyword, Options: "i"}},
-			bson.M{"alias": &bson.RegEx{Pattern: keyword, Options: "i"}},
-		},
-	}).Sort("weigth").Limit(50).All(&m)
-	return m
-}
-
-// For tag searching
-func GetStickersByTag(tag string, c *mgo.Collection) []bson.M {
-	m := []bson.M{}
-	c.Find(bson.M{"tag": tag}).Sort("weigth").Limit(50).All(&m)
-	return m
-}
-
-func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerDetailBag {
-	m := bson.M{}
-	bag := StickerDetailBag{}
-
-	// For Sticker, id is Int.
-	// For Theme, id is String.
-	if idInt, err := strconv.Atoi(id); err == nil {
-		c_stickers.Find(bson.M{"id": idInt}).One(&m)
-		bag.Id = m["id"].(int)
-	} else {
-		c_themes.Find(bson.M{"id": id}).One(&m)
-		bag.Id, _ = strconv.Atoi(m["id"].(string))
-	}
-
-	bag.Name = m["name"].(string)
-	bag.Detail = m["detail"].(string)
-	bag.Thumbnail = m["thumbnail"].(string)
-	bag.Description = m["description"].(string)
-
-	// Detail image may be list
-	imgList := make([]string, 0)
-	v := reflect.ValueOf(m["detailImg"])
-	if v.Kind() == reflect.String {
-		imgList = append(imgList, m["detailImg"].(string))
-	} else {
-		imgs := v
-		if imgs.Kind() != 0 {
-			for i := 0; i < imgs.Len(); i++ {
-				str := imgs.Index(i).Interface().(string)
-				imgList = append(imgList, str)
-			}
-		}
-	}
-	bag.DetailImg = imgList
-
-	// Try to convert into Int
-	v = reflect.ValueOf(m["price"])
-	if v.Kind() == reflect.Int {
-		bag.Price = v.Interface().(int)
-	} else if v.Kind() == reflect.Float64 {
-		bag.Price = int(v.Interface().(float64))
-	}
-
-	// Tag might be empty, need checking
-	tagList := make([]string, 0)
-	tags := reflect.ValueOf(m["tag"])
-	if tags.Kind() != 0 {
-		for i := 0; i < tags.Len(); i++ {
-			str := tags.Index(i).Interface().(string)
-			tagList = append(tagList, str)
-		}
-	}
-	bag.Tags = tagList
-
-	bag.Title = bag.Name + " | 歐貝賣專業代購"
-	return bag
-}
-
-func GenStickerBag(detect *mobiledetect.MobileDetect, c_stickers *mgo.Collection,
-	op_type int, keyword string, tag string) StickerBag {
-	limit := GetLimitByPlatform(detect)
-	tags := GetTags(c_stickers)
-	m := []bson.M{}
-	if keyword != "" {
-		m = GetStickersByKeyword(keyword, c_stickers)
-	} else if tag != "" {
-		m = GetStickersByTag(tag, c_stickers)
-	} else {
-		m = GetStickers(limit, c_stickers, op_type)
-	}
-	return StickerBag{Title: "LINE 貼圖| 歐貝賣專業代購", Ary: m, List: tags}
-}
-
-func UpdateMenuFile() string {
-	os.Chdir("/var/opt/www/go/note/")
-	if _, err := os.Stat("menu.md"); err == nil {
-		os.RemoveAll("menu.md") // Remove old one
-
-		// Do the conversion before write out
-		// No additional encoding config for file needed
-		if out, err := os.Create("menu.md"); err == nil {
-			out.WriteString("---\n")
-			out.WriteString("## Notes Contents List\n")
-			if a, err := filepath.Glob("**/*.md"); err == nil {
-				sort.Strings(a)
-
-				folderName := ""
-				for _, i := range a {
-					ary := strings.Split(string(i), "/")
-					if folderName != ary[0] {
-						out.WriteString("* **" + ary[0] + "**\n")
-						folderName = ary[0]
-					}
-					name := strings.Split(string(ary[1]), ".")[0]
-					out.WriteString("  - [" + name + "](" + i + ")\n")
-				}
-			}
-			out.WriteString("---")
-		}
-	}
-
-	b, _ := ioutil.ReadFile("menu.md")
-	os.Chdir("/var/opt/www/go/")
-	return string(b)
-}
-
-func GetNoteContents(fp string) (name, contents string) {
-	os.Chdir("/var/opt/www/go/note/")
-	_, err := os.Stat(fp)
-	if err != nil {
-		panic(err)
-	}
-	b, _ := ioutil.ReadFile(fp)
-	n := strings.Split(path.Base(fp), ".")[0]
-	os.Chdir("/var/opt/www/go/")
-	return n, string(b)
-}
-
-func NoteAuth(username, password string) bool {
-	return username == os.Getenv("NOTE_ACCOUNT") && password == os.Getenv("NOTE_PASSWORD")
-}
-
 func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	// Stop word list
-	stopwords := GetStopWords()
+	stopwords := book.GetStopWords()
 
 	// Connect to MongoDB
 	session, err := mgo.Dial("127.0.0.1")
@@ -503,7 +80,7 @@ func main() {
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := GenStickerBag(detect, c_stickers, 0, keyword, tag)
+		bag := obm.GenStickerBag(detect, c_stickers, 0, keyword, tag)
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -516,7 +93,7 @@ func main() {
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := GenStickerBag(detect, c_stickers, 1, keyword, tag)
+		bag := obm.GenStickerBag(detect, c_stickers, 1, keyword, tag)
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -529,7 +106,7 @@ func main() {
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := GenStickerBag(detect, c_stickers, 2, keyword, tag)
+		bag := obm.GenStickerBag(detect, c_stickers, 2, keyword, tag)
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -542,7 +119,7 @@ func main() {
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := GenStickerBag(detect, c_stickers, 3, keyword, tag)
+		bag := obm.GenStickerBag(detect, c_stickers, 3, keyword, tag)
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -555,7 +132,7 @@ func main() {
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := GenStickerBag(detect, c_stickers, 4, keyword, tag)
+		bag := obm.GenStickerBag(detect, c_stickers, 4, keyword, tag)
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -568,7 +145,7 @@ func main() {
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := GenStickerBag(detect, c_themes, 5, keyword, tag)
+		bag := obm.GenStickerBag(detect, c_themes, 5, keyword, tag)
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -578,7 +155,7 @@ func main() {
 
 	// Detail sticker page
 	m.Get("/detail/:id", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
-		bag := GetStickersDetail(params["id"], c_stickers, c_themes)
+		bag := obm.GetStickersDetail(params["id"], c_stickers, c_themes)
 		re.HTML(200, "darkly", bag)
 	})
 
@@ -590,7 +167,7 @@ func main() {
 				re.HTML(200, "rank", string(b))
 			}
 		} else {
-			url := "/go/book/random"
+			url := "/book/random"
 			http.Redirect(w, r, url, 302)
 		}
 	})
@@ -608,7 +185,7 @@ func main() {
 				}
 			}
 		}
-		m_ := GetBooksByKeyword(keyword, c_book)
+		m_ := book.GetBooksByKeyword(keyword, c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		r.HTML(200, "book", bag)
 	})
@@ -624,40 +201,40 @@ func main() {
 				keyword = ary[rand.Int()%len(ary)]
 			}
 		}
-		m_ := GetBooksByKeyword(keyword, c_book)
+		m_ := book.GetBooksByKeyword(keyword, c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		re.HTML(200, "search", bag)
 	})
 
 	m.Get("/search-book/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
 		keyword := params["str"]
-		words := CleanWords(ParseStringToNode(keyword), stopwords)
-		list := GetBooksByWords(words, c_score) // Get Book list by score
-		m_ := GetBookByList(list, c_book)
+		words := book.CleanWords(book.ParseStringToNode(keyword), stopwords)
+		list := book.GetBooksByWords(words, c_score) // Get Book list by score
+		m_ := book.GetBookByList(list, c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		re.HTML(200, "search", bag)
 	})
 
 	m.Post("/search", func(w http.ResponseWriter, r *http.Request, re render.Render) {
-		url := "/go/book/" + r.FormValue("text")
+		url := "/book/" + r.FormValue("text")
 		http.Redirect(w, r, url, 302)
 	})
 
 	m.Post("/search-book", func(w http.ResponseWriter, r *http.Request, re render.Render) {
-		url := "/go/search-book/" + r.FormValue("text")
+		url := "/search-book/" + r.FormValue("text")
 		http.Redirect(w, r, url, 302)
 	})
 
 	// ------------------------------------------------------------------------------------- //
 
-	m.Get("/note/", auth.BasicFunc(NoteAuth), func(w http.ResponseWriter, re render.Render) {
-		msg := UpdateMenuFile()
+	m.Get("/note/", auth.BasicFunc(note.NoteAuth), func(w http.ResponseWriter, re render.Render) {
+		msg := note.UpdateMenuFile()
 		bag := TemplateBag{Title: "Note Contents List", Msg: msg}
 		re.HTML(200, "md", bag)
 	})
 
-	m.Get("/note/:folder/:file", auth.BasicFunc(NoteAuth), func(params martini.Params, re render.Render) {
-		name, msg := GetNoteContents(params["folder"] + "/" + params["file"])
+	m.Get("/note/:folder/:file", auth.BasicFunc(note.NoteAuth), func(params martini.Params, re render.Render) {
+		name, msg := note.GetNoteContents(params["folder"] + "/" + params["file"])
 		bag := TemplateBag{Title: name, Msg: msg}
 		re.HTML(200, "md", bag)
 	})
