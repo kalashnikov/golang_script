@@ -29,6 +29,7 @@ type BookNode struct {
 	book_name      string
 	book_link      string
 	real_book_link string
+	txt_link       string
 }
 
 func getDocByURL(url string) *html.HtmlDocument {
@@ -60,8 +61,12 @@ func getRealLink(b BookNode, wg *sync.WaitGroup, c *mgo.Collection, s []*BookNod
 	}
 
 	m := bson.M{}
+	reid := regexp.MustCompile(`files/(.+).html`)
 	if err := c.Find(bson.M{"id": b.book_id}).One(&m); err == nil { // Do Query
 		b.real_book_link = m["booklink"].(string)
+		if array := reid.FindStringSubmatch(b.real_book_link); len(array) == 2 {
+			b.txt_link = "txt/" + string(array[1]) + ".txt"
+		}
 	}
 
 	// No lock due to fix write position for each goroutine
@@ -111,7 +116,7 @@ func genRankList(latest_url string, c *mgo.Collection) string {
 	markdown.WriteString("### [青空文庫　アクセスランキング](" + latest_url + "):\n")
 	for _, b := range slice {
 		idx := strconv.Itoa(b.rank + 1)
-		str := fmt.Sprintf("   %s. [%s](%s) - [%s](%s)\n", idx, b.author_name, b.author_link, b.book_name, b.real_book_link)
+		str := fmt.Sprintf("   %s. [%s](%s) - [%s](%s) [※](%s)\n", idx, b.author_name, b.author_link, b.book_name, b.real_book_link, b.txt_link)
 		markdown.WriteString(str)
 	}
 

@@ -6,13 +6,16 @@ import (
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
+	"os"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
 )
 
+const local_path = "/home/kalaexj/git-repo/golang_script/txt/"
 const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
 const RETURN_MAX_LENGTH = 30
 
@@ -166,6 +169,10 @@ func GetBooksByKeyword(keyword string, c *mgo.Collection) (r []bson.M) {
 	}
 
 	m_ := ResultArray(m).CleanResult()
+
+	for _, v := range m_ {
+		v["txtlink"] = CreateTxtLink(v["booklink"].(string))
+	}
 	return m_
 }
 
@@ -189,6 +196,10 @@ func GetBookByList(docList []int, c *mgo.Collection) (r []bson.M) {
 				m__ = append(m__, d)
 			}
 		}
+	}
+
+	for _, v := range m__ {
+		v["txtlink"] = CreateTxtLink(v["booklink"].(string))
 	}
 
 	return m__
@@ -225,4 +236,29 @@ func GetBooksByWords(keyword []string, c *mgo.Collection) []int {
 		final = vs.keys
 	}
 	return final
+}
+
+func CreateTxtLink(bookUrl string) string {
+	txtLink := ""
+	reid := regexp.MustCompile(`files/(.+).html`)
+	if array := reid.FindStringSubmatch(bookUrl); len(array) == 2 {
+		txtLink = "txt/" + string(array[1]) + ".txt"
+	}
+	return txtLink
+}
+
+func GetTxtContents(filename string) []string {
+	ary := make([]string, 0)
+	if _, err := os.Stat(local_path + filename); err == nil {
+		f, err := ioutil.ReadFile(local_path + filename)
+		if err != nil {
+			panic(err)
+		}
+		for _, v := range strings.Split(string(f), "\n") {
+			ary = append(ary, v)
+		}
+	} else {
+		panic(err)
+	}
+	return ary
 }

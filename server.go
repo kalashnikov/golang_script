@@ -159,6 +159,13 @@ func main() {
 		re.HTML(200, "darkly", bag)
 	})
 
+	// Detail sticker page
+	// http://obmshop.com/detail/%E6%B5%B7%E7%B6%BF%E5%AF%B6%E5%AF%B6%3CBR/%3Eline:/shop/detail/1528
+	m.Get("/detail/:s1/:s2/shop/detail/:id", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		url := "/detail/" + params["id"]
+		http.Redirect(w, r, url, 302)
+	})
+
 	// ------------------------------------------------------------------------------------- //
 
 	m.Get("/book/", func(w http.ResponseWriter, r *http.Request, re render.Render) {
@@ -188,6 +195,13 @@ func main() {
 		m_ := book.GetBooksByKeyword(keyword, c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		r.HTML(200, "book", bag)
+	})
+
+	m.Get("/book/txt/:str", func(params martini.Params, r render.Render) {
+		filename := params["str"]
+		contents := book.GetTxtContents(filename)
+		bag := TemplateBag{Title: filename, List: contents}
+		r.HTML(200, "txt", bag)
 	})
 
 	m.Get("/search-book/", func(w http.ResponseWriter, r *http.Request, re render.Render) {
@@ -222,6 +236,11 @@ func main() {
 
 	m.Post("/search-book", func(w http.ResponseWriter, r *http.Request, re render.Render) {
 		url := "/search-book/" + r.FormValue("text")
+		http.Redirect(w, r, url, 302)
+	})
+
+	m.Get("/search-book/txt/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		url := "/book/txt/" + params["str"]
 		http.Redirect(w, r, url, 302)
 	})
 
