@@ -131,6 +131,28 @@ func UpdateStickerRandomField(m []bson.M, c *mgo.Collection) {
 	}
 }
 
+// Decrease the weight in each view
+// This operation cost ~5ms for update
+func DecreaseStickerWeigth(m bson.M, c *mgo.Collection) {
+	id := m["id"]
+
+	val := m["weigth"]
+	v := reflect.ValueOf(m["weigth"])
+	if v.Kind() == reflect.Int {
+		val = float64(m["weigth"].(int)) - 0.2
+	} else if v.Kind() == reflect.Float64 {
+		val = m["weigth"].(float64) - 0.2
+	} else {
+		val = 0
+	}
+	m["weigth"] = val
+	m["update_at"] = time.Now()
+	_, err := c.Upsert(bson.M{"id": id}, bson.M{"$set": m})
+	if err != nil {
+		panic(err)
+	}
+}
+
 // Get the sticker data by ID and init bag for /detail/ pag
 func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerDetailBag {
 	m := bson.M{}
@@ -140,14 +162,13 @@ func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerD
 	// For Theme, id is String.
 	if idInt, err := strconv.Atoi(id); err == nil {
 		c_stickers.Find(bson.M{"id": idInt}).One(&m)
-
 		// If not found, try to get it
 		v := reflect.ValueOf(m["id"])
 		if v.Kind() != reflect.Int {
 			GetStickerInfo(id, c_stickers, c_themes)
 		}
-
 		bag.Id = m["id"].(int)
+		go DecreaseStickerWeigth(m, c_stickers)
 	} else {
 		c_themes.Find(bson.M{"id": id}).One(&m)
 		// If not found, try to get it
@@ -156,6 +177,7 @@ func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerD
 			GetStickerInfo(id, c_stickers, c_themes)
 		}
 		bag.Id, _ = strconv.Atoi(m["id"].(string))
+		go DecreaseStickerWeigth(m, c_themes)
 	}
 
 	bag.Name = m["name"].(string)
