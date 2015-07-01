@@ -6,9 +6,11 @@ import (
 	"github.com/kalashnikov/golang_script/utility"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+	"io/ioutil"
 	"math/rand"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -45,17 +47,29 @@ func GetLimitByPlatform(detect *mobiledetect.MobileDetect) int {
 	return limit
 }
 
+// Use tag file to speed up
+// Assumption: Tag editing feature is disabled.
 func GetTags(c *mgo.Collection) []string {
-	m := []string{}
 	m_ := []string{}
-	if err := c.Find(nil).Distinct("tag", &m); err == nil { // Do Query
-		for _, v := range m {
-			if v == "" || strings.Contains(v, "http") ||
-				strings.Contains(v, "line") ||
-				strings.Contains(v, " ") {
-				continue
+	m_ = append(m_, "隨機")
+	if _, err := os.Stat("/var/opt/www/go/tags.txt"); err == nil {
+		if b, err := ioutil.ReadFile("/var/opt/www/go/tags.txt"); err == nil {
+			for _, v := range strings.Split(string(b), ",") {
+				m_ = append(m_, v)
 			}
-			m_ = append(m_, v)
+		}
+	} else {
+		m := []string{}
+		if err := c.Find(nil).Distinct("tag", &m); err == nil { // Do Query
+			for _, v := range m {
+				if v == "" || strings.Contains(v, "http") ||
+					strings.Contains(v, "line") ||
+					strings.Contains(v, " ") ||
+					len(v) < 2 {
+					continue
+				}
+				m_ = append(m_, v)
+			}
 		}
 	}
 	return m_
@@ -96,10 +110,30 @@ func GetStickersByKeyword(keyword string, c *mgo.Collection) []bson.M {
 // For tag searching
 func GetStickersByTag(tag string, c *mgo.Collection) []bson.M {
 	m := []bson.M{}
-	c.Find(bson.M{"tag": tag}).Sort("weigth").Limit(50).All(&m)
+	if tag == "隨機" {
+		c.Find(nil).Sort("random").Limit(25).All(&m)
+		go UpdateStickerRandomField(c)
+	} else {
+		c.Find(bson.M{"tag": tag}).Sort("weigth").Limit(50).All(&m)
+	}
 	return m
 }
 
+func UpdateStickerRandomField(c *mgo.Collection) {
+	m := []bson.M{}
+	c.Find(nil).Sort("random").Limit(25).All(&m) // Get Top100 Sorted by Random
+	for _, v := range m {
+		id := v["id"]
+		v["random"] = rand.Int() % 100000000
+		v["update_at"] = time.Now()
+		_, err := c.Upsert(bson.M{"id": id}, bson.M{"$set": v})
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+// Get the sticker data by ID and init bag for /detail/ pag
 func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerDetailBag {
 	m := bson.M{}
 	bag := StickerDetailBag{}
