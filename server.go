@@ -258,7 +258,7 @@ func main() {
 
 	m.Get("/book/txt/:str", func(params martini.Params, r render.Render) {
 		filename := params["str"]
-		contents := book.GetTxtContents(filename)
+		contents := book.GetTxtContents(filename, c_book)
 		bag := TemplateBag{Title: filename, List: contents}
 		r.HTML(200, "txt", bag)
 	})
