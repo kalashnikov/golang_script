@@ -224,6 +224,21 @@ func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerD
 	return bag
 }
 
+func TrimStickerBagByDetect(detect *mobiledetect.MobileDetect, bag StickerBag) StickerBag {
+	limit := GetLimitByPlatform(detect)
+	bag.Ary = bag.Ary[0 : limit-1]
+	return bag
+}
+
+// Generate sticker bag for template,
+// Limit used. Mainly for Cache Array
+func GenStickerBagByLimit(limit, op_type int, c_stickers *mgo.Collection) StickerBag {
+	tags := GetTags(c_stickers)
+	m := GetStickers(limit, c_stickers, op_type)
+	return StickerBag{Title: "LINE 貼圖| 歐貝賣專業代購", Ary: m, List: tags}
+}
+
+// Generate sticker bag for template, dynamic generation by input
 func GenStickerBag(detect *mobiledetect.MobileDetect, c_stickers *mgo.Collection,
 	op_type int, keyword string, tag string) StickerBag {
 	limit := GetLimitByPlatform(detect)
