@@ -2,11 +2,14 @@ package book
 
 import (
 	"github.com/bluele/mecab-golang"
+	"github.com/qiniu/iconv"
 	"golang.org/x/text/width"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
 	"os"
+	"os/exec"
+	"path"
 	"reflect"
 	"regexp"
 	"sort"
@@ -16,6 +19,7 @@ import (
 )
 
 const local_path = "/home/kalaexj/git-repo/golang_script/txt/"
+const html_path = "/home/kalaexj/git-repo/golang_script/html/"
 const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
 const RETURN_MAX_LENGTH = 30
 
@@ -247,18 +251,66 @@ func CreateTxtLink(bookUrl string) string {
 	return txtLink
 }
 
-func GetTxtContents(filename string) []string {
+func GetTxtContents(filename string, c *mgo.Collection) []string {
 	ary := make([]string, 0)
-	if _, err := os.Stat(local_path + filename); err == nil {
-		f, err := ioutil.ReadFile(local_path + filename)
-		if err != nil {
-			panic(err)
-		}
-		for _, v := range strings.Split(string(f), "\n") {
-			ary = append(ary, v)
-		}
-	} else {
+	if _, err := os.Stat(local_path + filename); err != nil {
+		// Not found the txt file
+		// Download it from official
+		GenTxtFileByName(filename, c)
+	}
+	f, err := ioutil.ReadFile(local_path + filename)
+	if err != nil {
 		panic(err)
 	}
+	for _, v := range strings.Split(string(f), "\n") {
+		ary = append(ary, v)
+	}
 	return ary
+}
+
+func GenTxtFileByName(filename string, c *mgo.Collection) {
+	url_path, m := "", bson.M{}
+	id := strings.Split(filename, "_")[0]
+	if idInt, err := strconv.Atoi(id); err == nil {
+		if err := c.Find(bson.M{"id": idInt}).One(&m); err == nil { // Do Query
+			url_path = m["booklink"].(string) // URL Path
+			if err = os.Chdir(html_path); err != nil {
+				panic(err)
+			}
+			if _, err = exec.Command("wget", url_path).Output(); err != nil {
+				panic(err)
+			}
+		}
+	}
+	if err := os.Chdir(local_path); err != nil {
+		panic(err)
+	}
+	// Use Iconv to do the conversion
+	cd, err := iconv.Open("utf-8", "shift-jis") // convert shift-jis to utf-8
+	if err != nil {
+		return
+	}
+	defer cd.Close()
+	htmlname := html_path + path.Base(url_path)
+	txtname := local_path + filename
+	GenTxt(htmlname, txtname, cd)
+}
+
+// Generate Txt file from original html file
+func GenTxt(file, outpath string, cd iconv.Iconv) {
+	re_pre := regexp.MustCompile("(?is)^.*<title>")
+	re_en := regexp.MustCompile("(?i)<[/!?]?[^>]*[/!?]?>")
+	re_post := regexp.MustCompile("(?s)(</div>\n)?<div class=\"bibliographical_information\">.*$")
+
+	if f, err := ioutil.ReadFile(file); err == nil {
+		str := re_pre.ReplaceAllString(string(f), "") // Section front of content
+		str = re_post.ReplaceAllString(str, "")       // Section back of content
+		str = re_en.ReplaceAllString(str, "")         // Signle tag
+
+		// Do the conversion before write out
+		// No additional encoding config for file needed
+		if out, err := os.Create(outpath); err == nil {
+			out.WriteString(cd.ConvString(str))
+		}
+	}
 }

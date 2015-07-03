@@ -79,27 +79,48 @@ func genRankList(latest_url string, c *mgo.Collection) string {
 	var bookArray []BookNode
 	doc := getDocByURL(latest_url)
 	if nodeArr, err := doc.Search(css.Convert("tr td.normal a", css.GLOBAL)); err == nil {
-		for i := 0; i < len(nodeArr)-1; i += 2 {
-			author_name := strings.TrimSpace(nodeArr[i+1].FirstChild().String())
-			author_link := nodeArr[i+1].Attr("href")
-
+		i, idx := 0, 0
+		for i < len(nodeArr)-1 {
 			// Use book link url to extract author_id and generate author link
 			book_link := nodeArr[i].Attr("href")
 			book_name := strings.TrimSpace(nodeArr[i].FirstChild().String())
 
-			if strings.Contains(book_link, "person") {
-				author_name, book_name = book_name, author_name
-				author_link, book_link = book_link, author_link
+			// Multiple author, need to step advance to find next book link
+			for strings.Contains(book_link, "person") {
+				i++
+				book_link = nodeArr[i].Attr("href")
+				book_name = strings.TrimSpace(nodeArr[i].FirstChild().String())
 			}
 
+			author_name := strings.TrimSpace(nodeArr[i+1].FirstChild().String())
+			author_link := nodeArr[i+1].Attr("href")
+
 			bn := BookNode{
-				rank:        i / 2,
+				rank:        idx,
 				author_name: author_name,
 				author_link: author_link,
 				book_name:   book_name,
 				book_link:   book_link,
 			}
+
+			// Checking section
+			//
+			// aid := 0
+			// re_author := regexp.MustCompile("person([0-9]+).html")
+			// if array := re_author.FindStringSubmatch(author_link); len(array) == 2 {
+			// 	aid, _ = strconv.Atoi(string(array[1]))
+			// }
+			// bid := 0
+			// re_book := regexp.MustCompile("cards/([0-9]+)/card")
+			// if array := re_book.FindStringSubmatch(book_link); len(array) == 2 {
+			// 	bid, _ = strconv.Atoi(string(array[1]))
+			// }
+			// fmt.Printf("%s, %s | %d : %d | %t\n", author_link, book_link, aid, bid, (aid == bid))
+
 			bookArray = append(bookArray, bn)
+
+			i += 2
+			idx += 1
 		}
 	}
 

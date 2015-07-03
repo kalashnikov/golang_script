@@ -20,7 +20,7 @@ import (
 	//"log"
 	"math/rand"
 	"net/http"
-	_ "net/http/pprof"
+	"net/http/pprof"
 	"os"
 	"time"
 )
@@ -75,12 +75,47 @@ func main() {
 	// -------------------------------       OBM SHOP       -------------------------------- //
 	// ------------------------------------------------------------------------------------- //
 
+	obmCache := [5]obm.StickerBag{}
+	obmCached := [5]bool{false, false, false, false, false}
+
+	done := make(chan bool, 1) // NB: buffered
+	go func() {
+		for i := 0; i < 5; i++ {
+			obmCached[i], obmCache[i] = true, obm.GenStickerBagByLimit(80, i, c_stickers)
+		}
+		done <- true
+	}()
+	select {
+	case <-done:
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	ticker := time.NewTicker(time.Minute * 30)
+	go func() {
+		for _ = range ticker.C {
+			for i := 0; i < 5; i++ {
+				obmCached[i], obmCache[i] = true, obm.GenStickerBagByLimit(80, i, c_stickers)
+			}
+		}
+	}()
+
+	// Wait cache to complete
+	//for obmCached[0] == false {
+	//	time.Sleep(100 * time.Millisecond)
+	//}
+
 	// Official Sticker
 	m.Get("/lines/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		opcode := 0
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := obm.GenStickerBag(detect, c_stickers, 0, keyword, tag)
+		bag := obm.StickerBag{}
+		if tag == "" && keyword == "" && obmCached[opcode] == true {
+			bag = obm.TrimStickerBagByDetect(detect, obmCache[opcode])
+		} else {
+			bag = obm.GenStickerBag(detect, c_stickers, opcode, keyword, tag)
+		}
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -90,10 +125,16 @@ func main() {
 
 	// Original Sticker
 	m.Get("/clines/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		opcode := 1
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := obm.GenStickerBag(detect, c_stickers, 1, keyword, tag)
+		bag := obm.StickerBag{}
+		if tag == "" && keyword == "" && obmCached[opcode] == true {
+			bag = obm.TrimStickerBagByDetect(detect, obmCache[opcode])
+		} else {
+			bag = obm.GenStickerBag(detect, c_stickers, opcode, keyword, tag)
+		}
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -103,10 +144,16 @@ func main() {
 
 	// Sticker with Price 25
 	m.Get("/dollar25/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		opcode := 2
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := obm.GenStickerBag(detect, c_stickers, 2, keyword, tag)
+		bag := obm.StickerBag{}
+		if tag == "" && keyword == "" && obmCached[opcode] == true {
+			bag = obm.TrimStickerBagByDetect(detect, obmCache[opcode])
+		} else {
+			bag = obm.GenStickerBag(detect, c_stickers, opcode, keyword, tag)
+		}
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -116,10 +163,16 @@ func main() {
 
 	// Sticker with Price 50
 	m.Get("/dollar50/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		opcode := 3
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := obm.GenStickerBag(detect, c_stickers, 3, keyword, tag)
+		bag := obm.StickerBag{}
+		if tag == "" && keyword == "" && obmCached[opcode] == true {
+			bag = obm.TrimStickerBagByDetect(detect, obmCache[opcode])
+		} else {
+			bag = obm.GenStickerBag(detect, c_stickers, opcode, keyword, tag)
+		}
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -129,10 +182,16 @@ func main() {
 
 	// Sticker with Price 75
 	m.Get("/dollar75/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		opcode := 4
 		tag := r.FormValue("tag")
 		keyword := r.FormValue("filter")
 		detect := mobiledetect.NewMobileDetect(r, nil)
-		bag := obm.GenStickerBag(detect, c_stickers, 4, keyword, tag)
+		bag := obm.StickerBag{}
+		if tag == "" && keyword == "" && obmCached[opcode] == true {
+			bag = obm.TrimStickerBagByDetect(detect, obmCache[opcode])
+		} else {
+			bag = obm.GenStickerBag(detect, c_stickers, opcode, keyword, tag)
+		}
 		if detect.IsMobile() || detect.IsTablet() {
 			re.HTML(200, "line", bag)
 		} else {
@@ -199,7 +258,7 @@ func main() {
 
 	m.Get("/book/txt/:str", func(params martini.Params, r render.Render) {
 		filename := params["str"]
-		contents := book.GetTxtContents(filename)
+		contents := book.GetTxtContents(filename, c_book)
 		bag := TemplateBag{Title: filename, List: contents}
 		r.HTML(200, "txt", bag)
 	})
@@ -259,6 +318,16 @@ func main() {
 	})
 
 	// ------------------------------------------------------------------------------------- //
+
+	m.Get("/debug/pprof", pprof.Index)
+	m.Get("/debug/pprof/cmdline", pprof.Cmdline)
+	m.Get("/debug/pprof/profile", pprof.Profile)
+	m.Get("/debug/pprof/symbol", pprof.Symbol)
+	m.Post("/debug/pprof/symbol", pprof.Symbol)
+	m.Get("/debug/pprof/block", pprof.Handler("block").ServeHTTP)
+	m.Get("/debug/pprof/heap", pprof.Handler("heap").ServeHTTP)
+	m.Get("/debug/pprof/goroutine", pprof.Handler("goroutine").ServeHTTP)
+	m.Get("/debug/pprof/threadcreate", pprof.Handler("threadcreate").ServeHTTP)
 
 	m.Run()
 }

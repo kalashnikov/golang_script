@@ -30,6 +30,7 @@
 
 ### Package 
 - [Awesome Go](https://github.com/avelino/awesome-go)
+- [Happy Time Go Libraries](https://gist.github.com/squarism/914b26e316a2cb204188)
 - [GoQuery](https://github.com/PuerkitoBio/goquery)
 - [mgo](https://labix.org/mgo)
   + [Unstructured MongoDB collections with mgo](http://stackoverflow.com/questions/18340031/unstructured-mongodb-collections-with-mgo)
