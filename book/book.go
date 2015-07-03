@@ -18,7 +18,7 @@ import (
 	"unicode"
 )
 
-const local_path = "/home/kalaexj/git-repo/golang_script/txt/"
+const local_path = "/home/kalaexj/git-repo/golang_script/txtraw/"
 const html_path = "/home/kalaexj/git-repo/golang_script/html/"
 const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
 const RETURN_MAX_LENGTH = 30
@@ -246,12 +246,12 @@ func CreateTxtLink(bookUrl string) string {
 	txtLink := ""
 	reid := regexp.MustCompile(`files/(.+).html`)
 	if array := reid.FindStringSubmatch(bookUrl); len(array) == 2 {
-		txtLink = "txt/" + string(array[1]) + ".txt"
+		txtLink = "txtraw/" + string(array[1]) + ".txt"
 	}
 	return txtLink
 }
 
-func GetTxtContents(filename string, c *mgo.Collection) []string {
+func GetTxtContents(filename string, c *mgo.Collection) (string, []string) {
 	ary := make([]string, 0)
 	if _, err := os.Stat(local_path + filename); err != nil {
 		// Not found the txt file
@@ -265,7 +265,13 @@ func GetTxtContents(filename string, c *mgo.Collection) []string {
 	for _, v := range strings.Split(string(f), "\n") {
 		ary = append(ary, v)
 	}
-	return ary
+	name, id, m := "", strings.Split(filename, "_")[0], bson.M{}
+	if idInt, err := strconv.Atoi(id); err == nil {
+		if err := c.Find(bson.M{"id": idInt}).One(&m); err == nil { // Do Query
+			name = m["author"].(string) + " - " + m["title"].(string)
+		}
+	}
+	return name, ary
 }
 
 func GenTxtFileByName(filename string, c *mgo.Collection) {
@@ -299,13 +305,17 @@ func GenTxtFileByName(filename string, c *mgo.Collection) {
 // Generate Txt file from original html file
 func GenTxt(file, outpath string, cd iconv.Iconv) {
 	re_pre := regexp.MustCompile("(?is)^.*<title>")
-	re_en := regexp.MustCompile("(?i)<[/!?]?[^>]*[/!?]?>")
+	re_en := regexp.MustCompile("(?i)<[^/!?r>]{2}[^>]*[/!?]?>")
+	re_end1 := regexp.MustCompile("(?i)<[/!?][^r][^>]*>")
+	re_end2 := regexp.MustCompile("(?i)<[!?b]r[^>]*>")
 	re_post := regexp.MustCompile("(?s)(</div>\n)?<div class=\"bibliographical_information\">.*$")
 
 	if f, err := ioutil.ReadFile(file); err == nil {
 		str := re_pre.ReplaceAllString(string(f), "") // Section front of content
 		str = re_post.ReplaceAllString(str, "")       // Section back of content
 		str = re_en.ReplaceAllString(str, "")         // Signle tag
+		str = re_end1.ReplaceAllString(str, "")       // Signle tag
+		str = re_end2.ReplaceAllString(str, "")       // Signle tag
 
 		// Do the conversion before write out
 		// No additional encoding config for file needed

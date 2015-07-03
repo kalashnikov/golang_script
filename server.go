@@ -9,15 +9,16 @@ import (
 	"encoding/csv"
 	"github.com/Shaked/gomobiledetect"
 	"github.com/codegangsta/martini-contrib/render"
-	"github.com/go-martini/martini"
 	"github.com/kalashnikov/golang_script/book"
 	"github.com/kalashnikov/golang_script/note"
 	"github.com/kalashnikov/golang_script/obm"
+	"github.com/kalashnikov/martini"
 	"github.com/martini-contrib/auth"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
 	//"log"
+	"html/template"
 	"math/rand"
 	"net/http"
 	"net/http/pprof"
@@ -58,8 +59,21 @@ func main() {
 
 	m := martini.Classic()
 
-	// render html templates from directory
-	m.Use(render.Renderer())
+	// Render html templates from directory
+	// Support unescaped: https://gist.github.com/techslides/8760361
+	m.Use(render.Renderer(render.Options{
+		Funcs: []template.FuncMap{
+			{
+				"formatTime": func(args ...interface{}) string {
+					t1 := time.Unix(args[0].(int64), 0)
+					return t1.Format(time.Stamp)
+				},
+				"unescaped": func(args ...interface{}) template.HTML {
+					return template.HTML(args[0].(string))
+				},
+			},
+		},
+	}))
 
 	// Home
 	m.Get("/", func(r render.Render) {
@@ -98,11 +112,6 @@ func main() {
 			}
 		}
 	}()
-
-	// Wait cache to complete
-	//for obmCached[0] == false {
-	//	time.Sleep(100 * time.Millisecond)
-	//}
 
 	// Official Sticker
 	m.Get("/lines/", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
@@ -258,8 +267,8 @@ func main() {
 
 	m.Get("/book/txt/:str", func(params martini.Params, r render.Render) {
 		filename := params["str"]
-		contents := book.GetTxtContents(filename, c_book)
-		bag := TemplateBag{Title: filename, List: contents}
+		name, contents := book.GetTxtContents(filename, c_book)
+		bag := TemplateBag{Title: name, List: contents}
 		r.HTML(200, "txt", bag)
 	})
 
