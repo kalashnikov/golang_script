@@ -9,6 +9,7 @@ import (
 	"encoding/csv"
 	"github.com/Shaked/gomobiledetect"
 	"github.com/codegangsta/martini-contrib/render"
+	"github.com/golang/glog"
 	"github.com/kalashnikov/golang_script/book"
 	"github.com/kalashnikov/golang_script/note"
 	"github.com/kalashnikov/golang_script/obm"
@@ -16,9 +17,9 @@ import (
 	"github.com/martini-contrib/auth"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	"io/ioutil"
-	//"log"
 	"html/template"
+	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/http"
 	"net/http/pprof"
@@ -58,6 +59,25 @@ func main() {
 	c_themes := session.DB("obmWeb").C("themes")
 
 	m := martini.Classic()
+
+	// Logger returns a middleware handler that logs the request as it goes in and the response as it goes out.
+	m.Use(func() martini.Handler {
+		return func(res http.ResponseWriter, req *http.Request, c martini.Context, log *log.Logger) {
+			addr := req.Header.Get("X-Real-IP")
+			if addr == "" {
+				addr = req.Header.Get("X-Forwarded-For")
+				if addr == "" {
+					addr = req.RemoteAddr
+				}
+			}
+
+			rw := res.(martini.ResponseWriter)
+			c.Next()
+
+			now := time.Now().Format(time.RFC3339)
+			glog.Infof("%s [%s] \"%s %s\" %d", addr, now, req.Method, req.URL.Path, rw.Status())
+		}
+	})
 
 	// Render html templates from directory
 	// Support unescaped: https://gist.github.com/techslides/8760361
@@ -290,9 +310,7 @@ func main() {
 
 	m.Get("/search-book/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
 		keyword := params["str"]
-		words := book.CleanWords(book.ParseStringToNode(keyword), stopwords)
-		list := book.GetBooksByWords(words, c_score) // Get Book list by score
-		m_ := book.GetBookByList(list, c_book)
+		m_ :=  book.SearchBook(keyword, stopwords, c_book, c_score)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		re.HTML(200, "search", bag)
 	})

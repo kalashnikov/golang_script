@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -155,6 +156,30 @@ func (a ResultArray) CleanResult() ResultArray {
 		}
 	}
 	return re
+}
+
+func SearchBook(keyword string, stopwords map[string]bool, c_book, c_score *mgo.Collection) (r []bson.M) {
+	var m_ []bson.M
+	var wg sync.WaitGroup
+
+	// Search by TF-IDF score
+	wg.Add(1)
+	go func() {
+		words := CleanWords(ParseStringToNode(keyword), stopwords)
+		list := GetBooksByWords(words, c_score) // Get Book list by score
+		m_ = append(m_, GetBookByList(list, c_book)...)
+		wg.Done()
+	}()
+
+	// Search by Fuzzy search in author/title/original title field of DB
+	wg.Add(1)
+	go func() {
+		m_ = append(m_, GetBooksByKeyword(keyword, c_book)...)
+		wg.Done()
+	}()
+	wg.Wait()
+
+	return m_
 }
 
 // Search title/otitle/author for keyword and return author & book information
