@@ -7,18 +7,20 @@ package main
 
 import (
 	"encoding/csv"
+	"flag"
 	"fmt"
 	"github.com/bluele/mecab-golang"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
-	//"time"
 )
 
 func parseToNode(contents string) []string {
@@ -56,9 +58,27 @@ func parseToNode(contents string) []string {
 	return output
 }
 
-func calTF(file string, idfList map[string]float64, tfList map[string]map[string]float64) {
+func calTF(file string,
+	idfMap map[string]float64,
+	tfMap map[string]map[string]float64,
+	titleMap map[string]string) {
+
 	total_words := 0.0
 	results := map[string]float64{}
+
+	// Get File ID
+	file_id := ""
+	if strings.Contains(file, "_") {
+		file_id = strings.Split(path.Base(file), "_")[0]
+	} else {
+		file_id = strings.Split(path.Base(file), ".")[0]
+	}
+
+	for _, v := range parseToNode(titleMap[file_id]) {
+		results[v] += 5 // one for ten
+	}
+
+	// Calculate word count
 	if f, err := ioutil.ReadFile(file); err == nil {
 		for _, v := range parseToNode(string(f)) {
 			if v == "" {
@@ -74,31 +94,21 @@ func calTF(file string, idfList map[string]float64, tfList map[string]map[string
 		v = v / total_words
 	}
 
-	file_id := ""
-	if strings.Contains(file, "_") {
-		file_id = strings.Split(path.Base(file), "_")[0]
-	} else {
-		file_id = strings.Split(path.Base(file), ".")[0]
-	}
-	tfList[file_id] = results
+	tfMap[file_id] = results
 }
 
-func main() {
-	//start := time.Now()
-	cpunum := runtime.NumCPU()
-
-	tfList := make(map[string]map[string]float64, 20000)
-	idfList := make(map[string]float64, 220000)
-
+func LoadIDFMap(file string) map[string]float64 {
 	// Open File
-	f, ferr := os.Open("result_0623.csv")
+	f, ferr := os.Open(file)
 	if ferr != nil {
 		fmt.Printf("Open file failed: %s\n", ferr)
 		panic(ferr)
 	}
 	defer f.Close()
 
-	// Init idfList
+	idfMap := make(map[string]float64, 220000)
+
+	// Init idfMap
 	reader := csv.NewReader(f)
 	for {
 		ary, rerr := reader.Read()
@@ -109,9 +119,58 @@ func main() {
 			panic(rerr)
 		}
 		if n, err := strconv.ParseFloat(ary[2], 64); err == nil {
-			idfList[ary[0]] = n
+			idfMap[ary[0]] = n
 		}
 	}
+	return idfMap
+}
+
+func LoadTitleAuthorMap(file string) map[string]string {
+	// Open File
+	f, ferr := os.Open(file)
+	if ferr != nil {
+		fmt.Printf("Open file failed: %s\n", ferr)
+		panic(ferr)
+	}
+	defer f.Close()
+
+	titleMap := make(map[string]string, 15000)
+
+	// Init idfMap
+	reader := csv.NewReader(f)
+	for {
+		ary, rerr := reader.Read()
+		if rerr == io.EOF {
+			break
+		} else if rerr != nil {
+			fmt.Printf("CSV Reader failed: %s\n", rerr)
+			panic(rerr)
+		}
+
+		titleMap[ary[0]] = ary[1] + " " + ary[2]
+	}
+	return titleMap
+}
+
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
+func main() {
+	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
+	//start := time.Now()
+	cpunum := runtime.NumCPU()
+
+	tfMap := make(map[string]map[string]float64, 20000)
+	idfMap := LoadIDFMap("result_0623.csv")
+	titleMap := LoadTitleAuthorMap("book.csv")
 
 	// Ref: How would you define a pool of goroutines to be executed at once in Golang?
 	//  http://stackoverflow.com/questions/18405023/how-would-you-define-a-pool-of-goroutines-to-be-executed-at-once-in-golang
@@ -123,7 +182,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			for file := range tasks {
-				calTF(file, idfList, tfList)
+				calTF(file, idfMap, tfMap, titleMap)
 			}
 			wg.Done()
 		}()
@@ -140,8 +199,8 @@ func main() {
 	wg.Wait()
 
 	// Create the final data strcture
-	tfFinal := make(map[string]map[string]float64, len(tfList))
-	for doc, m := range tfList {
+	tfFinal := make(map[string]map[string]float64, len(tfMap))
+	for doc, m := range tfMap {
 		for word, v := range m {
 			if _, ok := tfFinal[word]; ok {
 				tfFinal[word][doc] = v
@@ -160,7 +219,7 @@ func main() {
 		if word == "" || strings.Contains(word, ",") {
 			continue
 		}
-		if idf, ok := idfList[word]; ok {
+		if idf, ok := idfMap[word]; ok {
 			fmt.Printf("%s,%g,", word, idf)
 			list := make([]string, 0, len(m))
 			for doc, v := range m {
