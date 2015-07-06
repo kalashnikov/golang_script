@@ -3,6 +3,7 @@ package obm
 import (
 	//"fmt"
 	"github.com/Shaked/gomobiledetect"
+	"github.com/garyburd/redigo/redis"
 	"github.com/kalashnikov/golang_script/utility"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
@@ -18,6 +19,35 @@ import (
 )
 
 type ResultArray []bson.M
+
+// a pool embedding the original pool and adding adbno state
+type DbnoPool struct {
+	redis.Pool
+}
+
+// "overriding" the Get method
+func (p *DbnoPool) Get(dbId int) redis.Conn {
+	conn := p.Pool.Get()
+	conn.Do("SELECT", dbId)
+	return conn
+}
+
+func InitRedisPool() DbnoPool {
+	pool2 := DbnoPool{
+		redis.Pool{
+			MaxIdle:   80,
+			MaxActive: 12000, // max number of connections
+			Dial: func() (redis.Conn, error) {
+				c, err := redis.Dial("tcp", ":6379")
+				if err != nil {
+					panic(err.Error())
+				}
+				return c, err
+			},
+		},
+	}
+	return pool2
+}
 
 type StickerBag struct {
 	Title string
@@ -73,6 +103,43 @@ func GetTags(c *mgo.Collection) []string {
 		}
 	}
 	return m_
+}
+
+func GetStickerByWeigth(limit int, c *mgo.Collection, conn redis.Conn, op_type int) []bson.M {
+	keys := make([]int, 0)
+	if op_type == 0 {
+		keys, _ = redis.Ints(conn.Do("ZRANGE", "set0", 0, limit))
+	} else if op_type == 1 {
+		keys, _ = redis.Ints(conn.Do("ZRANGE", "set1", 0, limit))
+	} else if op_type == 2 {
+		keys, _ = redis.Ints(conn.Do("ZRANGE", "set2", 0, limit))
+	} else if op_type == 3 {
+		keys, _ = redis.Ints(conn.Do("ZRANGE", "set3", 0, limit))
+	} else if op_type == 4 {
+		keys, _ = redis.Ints(conn.Do("ZRANGE", "set4", 0, limit))
+	} else {
+		keys, _ = redis.Ints(conn.Do("ZRANGE", "set0", 0, limit))
+	}
+
+	m := []bson.M{}
+	m_ := []bson.M{}
+	if err := c.Find(bson.M{"id": bson.M{"$in": keys}}).All(&m); err == nil { // Do Query
+		for _, v := range m {
+			m_ = append(m_, v)
+		}
+	}
+
+	// Sort into same order of docList
+	// O(n^2) but only size=20....
+	m__ := []bson.M{}
+	for _, v := range keys {
+		for _, d := range m_ {
+			if v == d["id"].(int) {
+				m__ = append(m__, d)
+			}
+		}
+	}
+	return m__
 }
 
 // Do the data retrieval and return result
@@ -239,7 +306,7 @@ func GenStickerBagByLimit(limit, op_type int, c_stickers *mgo.Collection) Sticke
 }
 
 // Generate sticker bag for template, dynamic generation by input
-func GenStickerBag(detect *mobiledetect.MobileDetect, c_stickers *mgo.Collection,
+func GenStickerBag(detect *mobiledetect.MobileDetect, c_stickers *mgo.Collection, //conn redis.Conn,
 	op_type int, keyword string, tag string) StickerBag {
 	limit := GetLimitByPlatform(detect)
 	tags := GetTags(c_stickers)
@@ -250,6 +317,7 @@ func GenStickerBag(detect *mobiledetect.MobileDetect, c_stickers *mgo.Collection
 		m = GetStickersByTag(tag, c_stickers)
 	} else {
 		m = GetStickers(limit, c_stickers, op_type)
+		//m = GetStickerByWeigth(limit, c_stickers, conn, op_type)
 	}
 	return StickerBag{Title: "LINE 貼圖| 歐貝賣專業代購", Ary: m, List: tags}
 }
