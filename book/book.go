@@ -2,6 +2,7 @@ package book
 
 import (
 	"github.com/bluele/mecab-golang"
+	"github.com/garyburd/redigo/redis"
 	"github.com/qiniu/iconv"
 	"golang.org/x/text/width"
 	"gopkg.in/mgo.v2"
@@ -23,6 +24,38 @@ const local_path = "/home/kalaexj/git-repo/golang_script/txtraw/"
 const html_path = "/home/kalaexj/git-repo/golang_script/html/"
 const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
 const RETURN_MAX_LENGTH = 30
+
+// a pool embedding the original pool and adding adbno state
+type DbnoPool struct {
+	redis.Pool
+	dbno int
+}
+
+// "overriding" the Get method
+func (p *DbnoPool) Get() redis.Conn {
+	conn := p.Pool.Get()
+	conn.Do("SELECT", p.dbno)
+	return conn
+}
+
+func InitRedisPool(dbId int) redis.Conn {
+	pool2 := &DbnoPool{
+		redis.Pool{
+			MaxIdle:   80,
+			MaxActive: 12000, // max number of connections
+			Dial: func() (redis.Conn, error) {
+				c, err := redis.Dial("tcp", ":6379")
+				if err != nil {
+					panic(err.Error())
+				}
+				return c, err
+			},
+		},
+		dbId, // the db number
+	}
+
+	return pool2.Get()
+}
 
 // Create a structure from map and sorted by value
 // https://gist.github.com/kylelemons/1236125
@@ -158,7 +191,7 @@ func (a ResultArray) CleanResult() ResultArray {
 	return re
 }
 
-func SearchBook(keyword string, stopwords map[string]bool, c_book, c_score *mgo.Collection) (r []bson.M) {
+func SearchBook(keyword string, stopwords map[string]bool, c_book, c_score *mgo.Collection, conn redis.Conn) (r []bson.M) {
 	var m_ []bson.M
 	var wg sync.WaitGroup
 
@@ -174,12 +207,25 @@ func SearchBook(keyword string, stopwords map[string]bool, c_book, c_score *mgo.
 	// Search by Fuzzy search in author/title/original title field of DB
 	wg.Add(1)
 	go func() {
-		m_ = append(m_, GetBooksByKeyword(keyword, c_book)...)
+		m_ = append(m_, GetBookByList(GetBooksByKeywordRedis(keyword, conn), c_book)...)
 		wg.Done()
 	}()
 	wg.Wait()
 
 	return m_
+}
+
+func GetBooksByKeywordRedis(keyword string, conn redis.Conn) []int {
+	keys, err := redis.Strings(conn.Do("Keys", "*"+keyword+"*"))
+	if err != nil {
+		panic(err)
+	}
+	list := make([]int, 0)
+	for _, word := range keys {
+		id, _ := redis.Int(conn.Do("GET", word))
+		list = append(list, id)
+	}
+	return list
 }
 
 // Search title/otitle/author for keyword and return author & book information

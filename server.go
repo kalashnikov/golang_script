@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/csv"
+	"github.com/garyburd/redigo/redis"
 	"github.com/Shaked/gomobiledetect"
 	"github.com/codegangsta/martini-contrib/render"
 	"github.com/golang/glog"
@@ -38,6 +39,19 @@ type TemplateBag struct {
 	List  []string
 }
 
+// a pool embedding the original pool and adding adbno state
+type DbnoPool struct {
+	redis.Pool
+	dbno int
+}
+
+// "overriding" the Get method
+func (p *DbnoPool) Get() redis.Conn {
+	conn := p.Pool.Get()
+	conn.Do("SELECT", p.dbno)
+	return conn
+}
+
 func main() {
 
 	rand.Seed(time.Now().UTC().UnixNano())
@@ -57,6 +71,10 @@ func main() {
 	c_score := session.DB("aozora").C("tf_idf")
 	c_stickers := session.DB("obmWeb").C("stickers")
 	c_themes := session.DB("obmWeb").C("themes")
+	
+	// Connect to Redis : author/title/otitle to book id
+	conn_desc := book.InitRedisPool(1)
+	defer conn_desc.Close()
 
 	m := martini.Classic()
 
@@ -280,7 +298,7 @@ func main() {
 				}
 			}
 		}
-		m_ := book.GetBooksByKeyword(keyword, c_book)
+		m_ := book.GetBookByList(book.GetBooksByKeywordRedis(keyword, conn_desc), c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		r.HTML(200, "book", bag)
 	})
@@ -303,14 +321,14 @@ func main() {
 				keyword = ary[rand.Int()%len(ary)]
 			}
 		}
-		m_ := book.GetBooksByKeyword(keyword, c_book)
+		m_ := book.GetBookByList(book.GetBooksByKeywordRedis(keyword, conn_desc), c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		re.HTML(200, "search", bag)
 	})
 
 	m.Get("/search-book/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
 		keyword := params["str"]
-		m_ :=  book.SearchBook(keyword, stopwords, c_book, c_score)
+		m_ :=  book.SearchBook(keyword, stopwords, c_book, c_score, conn_desc)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		re.HTML(200, "search", bag)
 	})
