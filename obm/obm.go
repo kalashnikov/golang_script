@@ -1,7 +1,7 @@
 package obm
 
 import (
-	//"fmt"
+	"fmt"
 	"github.com/Shaked/gomobiledetect"
 	"github.com/garyburd/redigo/redis"
 	"github.com/kalashnikov/golang_script/utility"
@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -432,4 +433,34 @@ func GetStickerInfo(idStr string, c_stickers, c_themes *mgo.Collection) bool {
 	}
 
 	return true
+}
+
+func GetStickersData(id string, c_stickers, c_themes *mgo.Collection, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	m := bson.M{}
+
+	// For Sticker, id is Int.
+	// For Theme, id is String.
+	if idInt, err := strconv.Atoi(id); err == nil {
+		c_stickers.Find(bson.M{"id": idInt}).One(&m)
+		// If not found, try to get it
+		v := reflect.ValueOf(m["id"])
+		if v.Kind() != reflect.Int {
+			ok := GetStickerInfo(id, c_stickers, c_themes)
+			if ok {
+				fmt.Printf("### Get %s ... %t\n", id, ok)
+			}
+		}
+	} else {
+		c_themes.Find(bson.M{"id": id}).One(&m)
+		// If not found, try to get it
+		v := reflect.ValueOf(m["id"])
+		if v.Kind() != reflect.String {
+			ok := GetStickerInfo(id, c_stickers, c_themes)
+			if ok {
+				fmt.Printf("### Get %s ... %t\n", id, ok)
+			}
+		}
+	}
 }
