@@ -23,23 +23,23 @@ import (
 const local_path = "/home/kalaexj/git-repo/golang_script/txtraw/"
 const html_path = "/home/kalaexj/git-repo/golang_script/html/"
 const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
+const work_folder = "/var/opt/www/go/"
 const RETURN_MAX_LENGTH = 30
 
 // a pool embedding the original pool and adding adbno state
 type DbnoPool struct {
 	redis.Pool
-	dbno int
 }
 
 // "overriding" the Get method
-func (p *DbnoPool) Get() redis.Conn {
+func (p *DbnoPool) Get(dbId int) redis.Conn {
 	conn := p.Pool.Get()
-	conn.Do("SELECT", p.dbno)
+	conn.Do("SELECT", dbId)
 	return conn
 }
 
-func InitRedisPool(dbId int) redis.Conn {
-	pool2 := &DbnoPool{
+func InitRedisPool() DbnoPool {
+	pool2 := DbnoPool{
 		redis.Pool{
 			MaxIdle:   80,
 			MaxActive: 12000, // max number of connections
@@ -51,10 +51,8 @@ func InitRedisPool(dbId int) redis.Conn {
 				return c, err
 			},
 		},
-		dbId, // the db number
 	}
-
-	return pool2.Get()
+	return pool2
 }
 
 // Create a structure from map and sorted by value
@@ -317,7 +315,7 @@ func CreateTxtLink(bookUrl string) string {
 	txtLink := ""
 	reid := regexp.MustCompile(`files/(.+).html`)
 	if array := reid.FindStringSubmatch(bookUrl); len(array) == 2 {
-		txtLink = "txtraw/" + string(array[1]) + ".txt"
+		txtLink = "txt/" + string(array[1]) + ".txt"
 	}
 	return txtLink
 }
@@ -371,6 +369,9 @@ func GenTxtFileByName(filename string, c *mgo.Collection) {
 	htmlname := html_path + path.Base(url_path)
 	txtname := local_path + filename
 	GenTxt(htmlname, txtname, cd)
+	if err := os.Chdir(work_folder); err != nil {
+		panic(err)
+	}
 }
 
 // Generate Txt file from original html file
