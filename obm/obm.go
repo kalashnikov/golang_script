@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/Shaked/gomobiledetect"
 	"github.com/garyburd/redigo/redis"
+	_ "github.com/golang/groupcache"
 	"github.com/kalashnikov/golang_script/utility"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
@@ -294,7 +295,9 @@ func GetStickersDetail(id string, c_stickers, c_themes *mgo.Collection) StickerD
 
 func TrimStickerBagByDetect(detect *mobiledetect.MobileDetect, bag StickerBag) StickerBag {
 	limit := GetLimitByPlatform(detect)
-	bag.Ary = bag.Ary[0 : limit-1]
+	if limit-1 < len(bag.Ary) {
+		bag.Ary = bag.Ary[0 : limit-1]
+	}
 	return bag
 }
 
