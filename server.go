@@ -7,11 +7,11 @@ package main
 
 import (
 	"encoding/csv"
-	"github.com/garyburd/redigo/redis"
 	"github.com/Shaked/gomobiledetect"
 	"github.com/codegangsta/martini-contrib/render"
 	"github.com/golang/glog"
 	"github.com/kalashnikov/golang_script/book"
+	"github.com/kalashnikov/golang_script/hack"
 	"github.com/kalashnikov/golang_script/note"
 	"github.com/kalashnikov/golang_script/obm"
 	"github.com/kalashnikov/martini"
@@ -36,20 +36,8 @@ type TemplateBag struct {
 	Ary   ResultArray
 	Ary2  ResultArray
 	Ary3  ResultArray
+	Data  []hack.News 
 	List  []string
-}
-
-// a pool embedding the original pool and adding adbno state
-type DbnoPool struct {
-	redis.Pool
-	dbno int
-}
-
-// "overriding" the Get method
-func (p *DbnoPool) Get() redis.Conn {
-	conn := p.Pool.Get()
-	conn.Do("SELECT", p.dbno)
-	return conn
 }
 
 func main() {
@@ -73,10 +61,11 @@ func main() {
 	c_themes := session.DB("obmWeb").C("themes")
 	
 	// Connect to Redis : author/title/otitle to book id
-	conn_desc := book.InitRedisPool(1)
-	defer conn_desc.Close()
+	redisPool := book.InitRedisPool()
 
 	m := martini.Classic()
+
+	m.Map(redisPool)
 
 	// Logger returns a middleware handler that logs the request as it goes in and the response as it goes out.
 	m.Use(func() martini.Handler {
@@ -285,7 +274,7 @@ func main() {
 		}
 	})
 
-	m.Get("/book/:str", func(params martini.Params, r render.Render) {
+	m.Get("/book/:str", func(params martini.Params, r render.Render, pool book.DbnoPool) {
 		keyword := params["str"]
 		if keyword == "random" {
 			if f, ferr := os.Open("authorList.csv"); ferr != nil {
@@ -298,6 +287,8 @@ func main() {
 				}
 			}
 		}
+		conn_desc := pool.Get(1)
+		defer conn_desc.Close()
 		m_ := book.GetBookByList(book.GetBooksByKeywordRedis(keyword, conn_desc), c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		r.HTML(200, "book", bag)
@@ -310,7 +301,7 @@ func main() {
 		r.HTML(200, "txt", bag)
 	})
 
-	m.Get("/search-book/", func(w http.ResponseWriter, r *http.Request, re render.Render) {
+	m.Get("/search-book/", func(w http.ResponseWriter, r *http.Request, re render.Render, pool book.DbnoPool) {
 		keyword := ""
 		if f, ferr := os.Open("authorList.csv"); ferr != nil {
 			panic(ferr)
@@ -321,13 +312,17 @@ func main() {
 				keyword = ary[rand.Int()%len(ary)]
 			}
 		}
+		conn_desc := pool.Get(1)
+		defer conn_desc.Close()
 		m_ := book.GetBookByList(book.GetBooksByKeywordRedis(keyword, conn_desc), c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		re.HTML(200, "search", bag)
 	})
 
-	m.Get("/search-book/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+	m.Get("/search-book/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render, pool book.DbnoPool) {
 		keyword := params["str"]
+		conn_desc := pool.Get(1)
+		defer conn_desc.Close()
 		m_ :=  book.SearchBook(keyword, stopwords, c_book, c_score, conn_desc)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
 		re.HTML(200, "search", bag)
@@ -360,6 +355,14 @@ func main() {
 		name, msg := note.GetNoteContents(params["folder"] + "/" + params["file"])
 		bag := TemplateBag{Title: name, Msg: msg}
 		re.HTML(200, "md", bag)
+	})
+
+	// ------------------------------------------------------------------------------------- //
+
+	m.Get("/hack/", func(w http.ResponseWriter, re render.Render) {
+		data := hack.GetData()
+		bag := TemplateBag{Title: "Hacker News", Data: data}
+		re.HTML(200, "hack", bag)
 	})
 
 	// ------------------------------------------------------------------------------------- //
