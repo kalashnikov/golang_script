@@ -1,12 +1,15 @@
 package book
 
 import (
+	"encoding/csv"
+	"fmt"
 	"github.com/bluele/mecab-golang"
 	"github.com/garyburd/redigo/redis"
 	"github.com/qiniu/iconv"
 	"golang.org/x/text/width"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -394,5 +397,52 @@ func GenTxt(file, outpath string, cd iconv.Iconv) {
 		if out, err := os.Create(outpath); err == nil {
 			out.WriteString(cd.ConvString(str))
 		}
+	}
+}
+
+//  <a href= {{ .author_link }} > {{.author}}</a> - <a href= {{ .booklink }} > {{.title}} </a> <a href= {{ .txtlink }} > ※ </a>
+type Rank struct {
+	Author_link string
+	Author      string
+	Booklink    string
+	Title       string
+	Txtlink     string
+}
+
+func GetRankingList() (title, title_link string, data []Rank) {
+	file, err := os.Open("/var/opt/www/go/ranklist.csv")
+	CheckError(err)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	csvreader := csv.NewReader(file)
+	record, err := csvreader.Read() // First line
+	title, title_link = record[0], record[1]
+	for {
+		record, err := csvreader.Read()
+		if err != io.EOF {
+			CheckError(err)
+		} else {
+			break
+		}
+		//fmt.Sprintf("%s,%s,%s. %s,%s,%s\n", b.author_name, b.author_link, idx, b.book_name, b.real_book_link, b.txt_link)
+		rank := Rank{
+			Author:      record[0],
+			Author_link: record[1],
+			Title:       record[2],
+			Booklink:    record[3],
+			Txtlink:     record[4],
+		}
+		data = append(data, rank)
+	}
+	return title, title_link, data
+}
+
+func CheckError(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Fatal error: %s", err.Error())
+		os.Exit(1)
 	}
 }

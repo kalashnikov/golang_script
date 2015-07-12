@@ -134,17 +134,18 @@ func genRankList(latest_url string, c *mgo.Collection) string {
 	wg.Wait()
 
 	var markdown bytes.Buffer
-	markdown.WriteString("### [青空文庫　アクセスランキング](" + latest_url + "):\n")
+	//markdown.WriteString("### [青空文庫　アクセスランキング](" + latest_url + "):\n")
+	markdown.WriteString("青空文庫　アクセスランキング," + latest_url + ",,,\n")
 	for _, b := range slice {
 		idx := strconv.Itoa(b.rank + 1)
-		str := fmt.Sprintf("   %s. [%s](%s) - [%s](%s) [※](%s)\n", idx, b.author_name, b.author_link, b.book_name, b.real_book_link, b.txt_link)
+		str := fmt.Sprintf("%s,%s,%s. %s,%s,%s\n", b.author_name, b.author_link, idx, b.book_name, b.real_book_link, b.txt_link)
 		markdown.WriteString(str)
 	}
 
 	return markdown.String()
 }
 
-const staticName = "ranklist.md"
+const staticName = "ranklist.csv"
 const work_folder = "/var/opt/www/go/"
 
 func main() {
@@ -173,7 +174,7 @@ func main() {
 
 	// Init output file name
 	re_post := regexp.MustCompile("_xhtml.html")
-	outputFile := fmt.Sprintf("ranklist_%s.md", re_post.ReplaceAllString(path.Base(latest_url), ""))
+	outputFile := fmt.Sprintf("ranklist_%s.csv", re_post.ReplaceAllString(path.Base(latest_url), ""))
 
 	if _, err = os.Stat(outputFile); err == nil {
 		// No update. Return

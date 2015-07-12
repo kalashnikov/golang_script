@@ -19,7 +19,6 @@ import (
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"html/template"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
@@ -32,11 +31,13 @@ type ResultArray []bson.M
 
 type TemplateBag struct {
 	Title string
+	Title_link string
 	Msg   string
 	Ary   ResultArray
 	Ary2  ResultArray
 	Ary3  ResultArray
 	Data  []hack.News 
+	Rank  []book.Rank
 	List  []string
 }
 
@@ -264,10 +265,10 @@ func main() {
 	// ------------------------------------------------------------------------------------- //
 
 	m.Get("/book/", func(w http.ResponseWriter, r *http.Request, re render.Render) {
-		if _, err := os.Stat("/var/opt/www/go/ranklist.md"); err == nil {
-			if b, err := ioutil.ReadFile("ranklist.md"); err == nil {
-				re.HTML(200, "rank", string(b))
-			}
+		if _, err := os.Stat("/var/opt/www/go/ranklist.csv"); err == nil {
+			title, title_link, data := book.GetRankingList()
+			bag := TemplateBag{Title: title, Title_link: title_link , Rank: data}
+			re.HTML(200, "rank2", bag)
 		} else {
 			url := "/book/random"
 			http.Redirect(w, r, url, 302)
@@ -291,7 +292,7 @@ func main() {
 		defer conn_desc.Close()
 		m_ := book.GetBookByList(book.GetBooksByKeywordRedis(keyword, conn_desc), c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
-		r.HTML(200, "book", bag)
+		r.HTML(200, "book2", bag)
 	})
 
 	m.Get("/book/txt/:str", func(params martini.Params, r render.Render) {
@@ -316,7 +317,7 @@ func main() {
 		defer conn_desc.Close()
 		m_ := book.GetBookByList(book.GetBooksByKeywordRedis(keyword, conn_desc), c_book)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
-		re.HTML(200, "search", bag)
+		re.HTML(200, "book2", bag)
 	})
 
 	m.Get("/search-book/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render, pool book.DbnoPool) {
@@ -325,7 +326,7 @@ func main() {
 		defer conn_desc.Close()
 		m_ :=  book.SearchBook(keyword, stopwords, c_book, c_score, conn_desc)
 		bag := TemplateBag{Title: keyword + "を検索", Ary: m_}
-		re.HTML(200, "search", bag)
+		re.HTML(200, "book2", bag)
 	})
 
 	m.Post("/search", func(w http.ResponseWriter, r *http.Request, re render.Render) {
