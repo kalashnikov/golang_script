@@ -66,7 +66,7 @@ func main() {
 				continue
 			}
 			re := regexp.MustCompile("[,\"]")
-			str := fmt.Sprintf("%d,\"%s\",%s\n", v.Score, re.ReplaceAllString(v.Title, " "), v.Url)
+			str := fmt.Sprintf("%d,\"%s\",\"%s\"\n", v.Score, re.ReplaceAllString(v.Title, " "), v.Url)
 			out.WriteString(str)
 		}
 	}
