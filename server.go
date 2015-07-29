@@ -302,6 +302,13 @@ func main() {
 		r.HTML(200, "txt", bag)
 	})
 
+	m.Get("/book/book_txt/:str", func(params martini.Params, r render.Render) {
+		filename := params["str"]
+		name, contents := book.GetNovelContents(filename, c_book)
+		bag := TemplateBag{Title: name, List: contents}
+		r.HTML(200, "txt", bag)
+	})
+
 	m.Get("/search-book/", func(w http.ResponseWriter, r *http.Request, re render.Render, pool book.DbnoPool) {
 		keyword := ""
 		if f, ferr := os.Open("authorList.csv"); ferr != nil {
@@ -341,6 +348,11 @@ func main() {
 
 	m.Get("/search-book/txt/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
 		url := "/book/txt/" + params["str"]
+		http.Redirect(w, r, url, 302)
+	})
+	
+	m.Get("/search-book/book_txt/:str", func(params martini.Params, w http.ResponseWriter, r *http.Request, re render.Render) {
+		url := "/book/book_txt/" + params["str"]
 		http.Redirect(w, r, url, 302)
 	})
 

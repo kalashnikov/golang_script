@@ -6,6 +6,7 @@ import (
 	"github.com/bluele/mecab-golang"
 	"github.com/garyburd/redigo/redis"
 	"github.com/qiniu/iconv"
+	"golang.org/x/text/unicode/norm"
 	"golang.org/x/text/width"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
@@ -23,7 +24,8 @@ import (
 	"unicode"
 )
 
-const local_path = "/home/kalaexj/git-repo/golang_script/txtraw/"
+const local_path1 = "/home/kalaexj/git-repo/golang_script/txtraw/"
+const local_path2 = "/home/kalaexj/git-repo/golang_script/book_txt/"
 const html_path = "/home/kalaexj/git-repo/golang_script/html/"
 const AUTHORLINKPREFIX = "http://www.aozora.gr.jp/index_pages/person"
 const work_folder = "/var/opt/www/go/"
@@ -316,24 +318,51 @@ func GetBooksByWords(keyword []string, c *mgo.Collection) []int {
 
 func CreateTxtLink(bookUrl string) string {
 	txtLink := ""
-	reid := regexp.MustCompile(`files/(.+).html`)
-	if array := reid.FindStringSubmatch(bookUrl); len(array) == 2 {
-		txtLink = "txt/" + string(array[1]) + ".txt"
+	if strings.Contains(bookUrl, "book_txt") {
+		txtLink = bookUrl
+	} else {
+		reid := regexp.MustCompile(`files/(.+).html`)
+		if array := reid.FindStringSubmatch(bookUrl); len(array) == 2 {
+			txtLink = "txt/" + string(array[1]) + ".txt"
+		}
 	}
 	return txtLink
 }
 
 func GetTxtContents(filename string, c *mgo.Collection) (string, []string) {
 	ary := make([]string, 0)
-	if _, err := os.Stat(local_path + filename); err != nil {
+	if _, err := os.Stat(local_path1 + filename); err != nil {
 		// Not found the txt file
 		// Download it from official
 		GenTxtFileByName(filename, c)
 	}
-	f, err := ioutil.ReadFile(local_path + filename)
+	f, err := ioutil.ReadFile(local_path1 + filename)
 	if err != nil {
 		panic(err)
 	}
+	for _, v := range strings.Split(string(f), "\n") {
+		ary = append(ary, v)
+	}
+	name, id, m := "", strings.Split(filename, "_")[0], bson.M{}
+	if idInt, err := strconv.Atoi(id); err == nil {
+		if err := c.Find(bson.M{"id": idInt}).One(&m); err == nil { // Do Query
+			name = m["author"].(string) + " - " + m["title"].(string)
+		}
+	}
+	return name, ary
+}
+
+func GetNovelContents(filename string, c *mgo.Collection) (string, []string) {
+	fname := []byte(filename)
+	path := local_path2 + string(norm.NFC.Bytes(fname))
+	if _, err := os.Stat(path); err != nil {
+		panic(err)
+	}
+	f, err := ioutil.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	ary := make([]string, 0)
 	for _, v := range strings.Split(string(f), "\n") {
 		ary = append(ary, v)
 	}
@@ -360,7 +389,7 @@ func GenTxtFileByName(filename string, c *mgo.Collection) {
 			}
 		}
 	}
-	if err := os.Chdir(local_path); err != nil {
+	if err := os.Chdir(local_path1); err != nil {
 		panic(err)
 	}
 	// Use Iconv to do the conversion
@@ -370,7 +399,7 @@ func GenTxtFileByName(filename string, c *mgo.Collection) {
 	}
 	defer cd.Close()
 	htmlname := html_path + path.Base(url_path)
-	txtname := local_path + filename
+	txtname := local_path1 + filename
 	GenTxt(htmlname, txtname, cd)
 	if err := os.Chdir(work_folder); err != nil {
 		panic(err)
