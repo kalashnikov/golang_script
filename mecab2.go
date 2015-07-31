@@ -256,7 +256,8 @@ func parseToNode(contents string) []string {
 
 	node := tg.ParseToNode(lt)
 	for {
-		if node.Feature()[0:strings.Index(node.Feature(), ",")] == "名詞" {
+		feature := string(node.Feature())
+		if feature[0:strings.Index(feature, ",")] == "名詞" {
 			output = append(output, node.Surface())
 		}
 		if node.Next() != nil {
