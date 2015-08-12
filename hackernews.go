@@ -11,6 +11,7 @@ import (
 )
 
 type News struct {
+	Id    int
 	Title string
 	Url   string
 	Score int
@@ -65,8 +66,13 @@ func main() {
 			if v.Title == "" {
 				continue
 			}
+
+			turl := v.Url
+			if turl == "" {
+				turl = fmt.Sprintf("https://news.ycombinator.com/item?id=%d", v.Id)
+			}
 			re := regexp.MustCompile("[,\"]")
-			str := fmt.Sprintf("%d,\"%s\",\"%s\"\n", v.Score, re.ReplaceAllString(v.Title, " "), v.Url)
+			str := fmt.Sprintf("%d,\"%s\",\"%s\"\n", v.Score, re.ReplaceAllString(v.Title, " "), turl)
 			out.WriteString(str)
 		}
 	}
