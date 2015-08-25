@@ -11,6 +11,7 @@ import (
 type News struct {
 	Title string
 	Url   string
+	CUrl  string
 	Score int
 }
 
@@ -33,7 +34,7 @@ func GetData() []News {
 		}
 		score, err := strconv.Atoi(record[0])
 		CheckError(err)
-		news := News{Title: record[1], Score: score, Url: record[2]}
+		news := News{Title: record[1], Score: score, Url: record[2], CUrl: record[3]}
 		data = append(data, news)
 	}
 	return data

@@ -67,12 +67,14 @@ func main() {
 				continue
 			}
 
+			curl := fmt.Sprintf("https://news.ycombinator.com/item?id=%d", v.Id)
+
 			turl := v.Url
 			if turl == "" {
-				turl = fmt.Sprintf("https://news.ycombinator.com/item?id=%d", v.Id)
+				turl = curl
 			}
 			re := regexp.MustCompile("[,\"]")
-			str := fmt.Sprintf("%d,\"%s\",\"%s\"\n", v.Score, re.ReplaceAllString(v.Title, " "), turl)
+			str := fmt.Sprintf("%d,\"%s\",\"%s\",\"%s\"\n", v.Score, re.ReplaceAllString(v.Title, " "), turl, curl)
 			out.WriteString(str)
 		}
 	}
