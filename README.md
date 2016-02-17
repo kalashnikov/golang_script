@@ -50,7 +50,7 @@
 
 ---
 
-### [Aozora Full-text Search](http://kalakuo.info/go/search-book/), [OBM Shop](http://obmshop.com/lines), [Hackernew scan](http://kalakuo.info/hack/)
+### [Aozora Full-text Search](http://kalakuo.info/book/), [OBM Shop](http://obmshop.com/lines), [Hackernew scan](http://kalakuo.info/hack/)
 
 ---
 
